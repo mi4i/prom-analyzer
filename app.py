@@ -4,9 +4,8 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import re
-import io
 import json
-import os
+import sqlite3
 import random
 from collections import Counter
 import plotly.express as px
@@ -14,28 +13,53 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# Файл для постоянного хранения Избранного между перезагрузками страницы
-FAV_FILE = "favorites.json"
+# --- Модуль работы с базой данных SQLite на сервере ---
+DB_NAME = "favorites.db"
 
-def load_favorites():
-    """Загрузка избранного из JSON файла"""
-    if os.path.exists(FAV_FILE):
-        try:
-            with open(FAV_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS favorites (
+            link TEXT PRIMARY KEY,
+            data TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-def save_favorites(fav_list):
-    """Сохранение избранного в JSON файл"""
-    try:
-        with open(FAV_FILE, "w", encoding="utf-8") as f:
-            json.dump(fav_list, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.error(f"Ошибка сохранения: {e}")
+def load_favorites_db():
+    init_db()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT data FROM favorites")
+    rows = c.fetchall()
+    conn.close()
+    return [json.loads(r[0]) for r in rows]
 
-# Инициализация состояний
+def add_favorite_db(item):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO favorites (link, data) VALUES (?, ?)", 
+              (item["Ссылка"], json.dumps(item, ensure_ascii=False)))
+    conn.commit()
+    conn.close()
+
+def remove_favorite_db(link):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM favorites WHERE link = ?", (link,))
+    conn.commit()
+    conn.close()
+
+def clear_favorites_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM favorites")
+    conn.commit()
+    conn.close()
+
+# --- Инициализация состояния ---
 TOP_DROPSHIP_QUERIES = [
     "подсветка для унитаза с датчиком движения",
     "сенсорный аэратор на кран 1080 градусов",
@@ -54,9 +78,8 @@ TOP_DROPSHIP_QUERIES = [
 if "default_query" not in st.session_state:
     st.session_state["default_query"] = random.choice(TOP_DROPSHIP_QUERIES)
 
-# Загружаем сохраненное из файла
-if "favorites" not in st.session_state:
-    st.session_state["favorites"] = load_favorites()
+# Загрузка актуального Избранного из БД сервера
+st.session_state["favorites"] = load_favorites_db()
 
 if "results" not in st.session_state:
     st.session_state["results"] = []
@@ -90,7 +113,7 @@ st.markdown("""
 
 st.title("📊 Prom.ua Product & Market Analyzer Pro")
 
-# --- Сайдбар с настройками ---
+# --- Сайдбар ---
 with st.sidebar:
     st.header("⚙️ Поисковый модуль")
     query = st.text_input("Поисковый запрос:", value=st.session_state["default_query"])
@@ -221,7 +244,7 @@ if start_scan:
 
 st.markdown("---")
 
-# --- ВСЕГДА ВИДИМЫЕ ВКЛАДКИ ---
+# --- Вкладки интерфейса ---
 tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
     f"📋 Найдено товаров ({len(st.session_state['results'])})", 
     f"⭐ Избранное & Топ-3 ({len(st.session_state['favorites'])})",
@@ -229,7 +252,7 @@ tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
     "🔍 SEO & Ключевые слова"
 ])
 
-# === ВКЛАДКА 1: Поиск/Результаты ===
+# === ВКЛАДКА 1: Поиск ===
 with tab_list:
     if not st.session_state["results"]:
         st.info("💡 Нажмите **'🚀 Запустить сканирование'**, чтобы собрать товары по выбранному запросу.")
@@ -288,13 +311,12 @@ with tab_list:
                         
                         if st.button(btn_label, key=f"fav_btn_{row_idx}_{item['Ссылка'][-10:]}"):
                             if is_in_fav:
-                                st.session_state["favorites"] = [f for f in st.session_state["favorites"] if f["Ссылка"] != item["Ссылка"]]
-                                save_favorites(st.session_state["favorites"])
-                                st.toast("Удалено из Избранного", icon="🗑️")
+                                remove_favorite_db(item["Ссылка"])
+                                st.toast("Удалено из БД", icon="🗑️")
                             else:
-                                st.session_state["favorites"].append(item)
-                                save_favorites(st.session_state["favorites"])
-                                st.toast("Добавлено в Избранное! ⭐", icon="✅")
+                                add_favorite_db(item)
+                                st.toast("Сохранено в БД сервера! ⭐", icon="✅")
+                            st.session_state["favorites"] = load_favorites_db()
                             st.rerun()
 
                     with b_col2:
@@ -311,20 +333,20 @@ with tab_list:
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# === ВКЛАДКА 2: ИЗБРАННОЕ (СОХРАНЯЕТСЯ В ФАЙЛ) ===
+# === ВКЛАДКА 2: ИЗБРАННОЕ (ХРАНИТСЯ В БАЗЕ ДАННЫХ SQLite) ===
 with tab_fav:
     c_fav_head, c_fav_clear = st.columns([4, 1])
     with c_fav_head:
-        st.subheader("⭐ Отобранные товары для рекламы")
+        st.subheader("⭐ Отобранные товары в БД сервера")
     with c_fav_clear:
         if st.session_state["favorites"]:
-            if st.button("🧹 Очистить всё"):
+            if st.button("🧹 Очистить всё в БД"):
+                clear_favorites_db()
                 st.session_state["favorites"] = []
-                save_favorites([])
                 st.rerun()
 
     if not st.session_state["favorites"]:
-        st.info("Список избранного пока пуст. Нажимайте кнопку **'⭐ В избранное'** возле товаров. Все данные будут сохраняться автоматически.")
+        st.info("В базе данных сервера пока нет сохраненных товаров. Нажимайте кнопку **'⭐ В избранное'** возле товаров.")
     else:
         fav_df = pd.DataFrame(st.session_state["favorites"])
         st.write("Отметьте галочками **до 3-х лучших товаров** для запуска в рекламу:")
@@ -343,13 +365,13 @@ with tab_fav:
                 st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
             with f_c4:
                 if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
-                    st.session_state["favorites"].pop(f_idx)
-                    save_favorites(st.session_state["favorites"])
+                    remove_favorite_db(f_item["Ссылка"])
+                    st.session_state["favorites"] = load_favorites_db()
                     st.rerun()
             st.markdown("---")
 
         if len(selected_for_ads) > 3:
-            st.warning("⚠️ Выбрано больше 3-х товаров. Лучше сфокусироваться максимум на 3 офферах для тестов!")
+            st.warning("⚠️ Выбрано больше 3-х товаров. Рекомендуется выбрать не более 3-х офферов.")
         
         if selected_for_ads:
             st.subheader("🚀 Ваша тройка для рекламного теста")
