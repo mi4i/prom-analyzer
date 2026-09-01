@@ -5,11 +5,32 @@ from bs4 import BeautifulSoup
 import time
 import re
 import io
+import random
 from collections import Counter
 import plotly.express as px
 from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
+
+# Пул актуальных Wоw-товаров (решают бытовую проблему, высокий ROI, нет в Авроре)
+TOP_DROPSHIP_QUERIES = [
+    "подсветка для унитаза с датчиком движения",
+    "сенсорный аэратор на кран 1080 градусов",
+    "аккумуляторный светодиодный светильник с датчиком движения",
+    "электрический трос для очистки засоров каналов",
+    "портативный вакууматор для пакетов ручной",
+    "ультразвуковая ванночка для очистки предметов",
+    "силиконовый ленточный уплотнитель для дверей и окон",
+    "машинка для удаления катышек аккумуляторная",
+    "антивибрационные подставки для стиральной машины",
+    "бесконтактный сенсорный дозатор жидкого мыла",
+    "магнитная щетка для мытья окон с двух сторон",
+    "гибкая насадка на душ с фильтром и турбиной"
+]
+
+# Выбор случайного товара при каждом запуске/перезагрузке приложения
+if "default_query" not in st.session_state:
+    st.session_state["default_query"] = random.choice(TOP_DROPSHIP_QUERIES)
 
 st.markdown("""
 <style>
@@ -38,6 +59,7 @@ st.markdown("""
     .col-product { flex: 3.5; display: flex; gap: 16px; }
     .col-price { flex: 1; font-weight: 700; font-size: 1.1rem; color: #111827; padding-top: 4px; }
     .col-store { flex: 1.5; padding-top: 4px; }
+    
     .product-img {
         width: 85px;
         height: 85px;
@@ -46,7 +68,17 @@ st.markdown("""
         border: 1px solid #F0F0F5;
         background: #FFFFFF;
         flex-shrink: 0;
+        transition: transform 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
+        position: relative;
+        z-index: 1;
+        cursor: pointer;
     }
+    .product-img:hover {
+        transform: scale(2.4);
+        z-index: 100;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    }
+
     .product-title {
         font-weight: 700;
         font-size: 0.98rem;
@@ -93,10 +125,16 @@ st.markdown("""
 
 st.title("📊 Prom.ua Product & Market Analyzer Pro")
 
-# --- Сайдбар с настройками парсинга ---
 with st.sidebar:
     st.header("⚙️ Поисковый модуль")
-    query = st.text_input("Поисковый запрос:", "органайзер")
+    
+    # Динамическая подстановка трендового товара
+    query = st.text_input("Поисковый запрос:", value=st.session_state["default_query"])
+    
+    if st.button("🎲 Другой трендовый оффер"):
+        st.session_state["default_query"] = random.choice(TOP_DROPSHIP_QUERIES)
+        st.rerun()
+
     pages_count = st.slider("Страниц для сбора:", 1, 10, 3)
     
     st.header("💰 Фильтр по цене при сборе")
@@ -108,12 +146,11 @@ with st.sidebar:
     exclude_keywords = st.text_input("Исключить слова (через запятую):", "чехол, подставка")
     exclude_sellers = st.text_input("Исключить продавцов (через запятую):", "")
 
-# --- Логика сканирования ---
 if st.button("🚀 Запустить полное сканирование", type="primary"):
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "uk-UA,uk;q=0.9,ru;q=0.8,en-US;q=0.7,en;q=0.6"
     })
     
@@ -124,7 +161,6 @@ if st.button("🚀 Запустить полное сканирование", ty
     stop_words_filter = [w.strip().lower() for w in exclude_keywords.split(",") if w.strip()]
     stop_sellers_filter = [s.strip().lower() for s in exclude_sellers.split(",") if s.strip()]
     
-    # URL-кодирование поискового запроса для безопасной передачи в заголовках Referer
     encoded_query = quote(query)
 
     for page in range(1, pages_count + 1):
@@ -139,22 +175,32 @@ if st.button("🚀 Запустить полное сканирование", ty
             res = session.get(url, params=params, timeout=12)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                blocks = soup.select('[data-qaid="product_block"]')
+                
+                # Мульти-селектор для обхода разных типов верстки Prom.ua
+                blocks = (
+                    soup.select('[data-qaid="product_block"]') or 
+                    soup.select('[data-qaid="product_card"]') or 
+                    soup.select('div[data-qaid="product_link"]') or
+                    soup.select('article')
+                )
                 
                 for b in blocks:
-                    name_el = b.select_one('[data-qaid="product_name"]')
-                    price_el = b.select_one('[data-qaid="product_price"]')
-                    link_el = b.select_one('a')
+                    name_el = b.select_one('[data-qaid="product_name"]') or b.select_one('a[title]')
+                    price_el = b.select_one('[data-qaid="product_price"]') or b.select_one('span[data-qaid="price"]')
+                    link_el = b.select_one('a[href]')
                     img_el = b.select_one('img')
                     sales_el = b.select_one('[data-qaid="rating_info"]') or b.select_one('[data-qaid="reviews_count"]')
                     supplier_el = b.select_one('[data-qaid="company_link"]') or b.select_one('[data-qaid="company_name"]')
                     
                     if name_el and price_el:
-                        name = name_el.text.strip()
+                        name = name_el.text.strip() if name_el.text.strip() else name_el.get("title", "").strip()
                         raw_price = price_el.text.strip()
                         digits = "".join(c for c in raw_price if c.isdigit())
                         price = int(digits) if digits else 0
                         
+                        if price == 0 or not name:
+                            continue
+
                         if price_filter_enabled:
                             if min_price_input > 0 and price < min_price_input:
                                 continue
@@ -181,7 +227,7 @@ if st.button("🚀 Запустить полное сканирование", ty
 
                         img_url = "https://via.placeholder.com/85?text=No+Photo"
                         if img_el:
-                            src = img_el.get("src") or img_el.get("data-src") or ""
+                            src = img_el.get("src") or img_el.get("data-src") or img_el.get("srcset", "").split(" ")[0]
                             if src:
                                 img_url = "https:" + src if src.startswith("//") else src
 
@@ -205,7 +251,6 @@ if st.button("🚀 Запустить полное сканирование", ty
     status_box.empty()
     st.session_state["results"] = products
 
-# --- Основной интерфейс результатов ---
 if "results" in st.session_state and st.session_state["results"]:
     data = st.session_state["results"]
     df = pd.DataFrame(data)
