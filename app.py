@@ -5,6 +5,8 @@ from bs4 import BeautifulSoup
 import time
 import re
 import io
+import json
+import os
 import random
 from collections import Counter
 import plotly.express as px
@@ -12,7 +14,28 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# Инициализация состояний (хранятся между перезапусками)
+# Файл для постоянного хранения Избранного между перезагрузками страницы
+FAV_FILE = "favorites.json"
+
+def load_favorites():
+    """Загрузка избранного из JSON файла"""
+    if os.path.exists(FAV_FILE):
+        try:
+            with open(FAV_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_favorites(fav_list):
+    """Сохранение избранного в JSON файл"""
+    try:
+        with open(FAV_FILE, "w", encoding="utf-8") as f:
+            json.dump(fav_list, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"Ошибка сохранения: {e}")
+
+# Инициализация состояний
 TOP_DROPSHIP_QUERIES = [
     "подсветка для унитаза с датчиком движения",
     "сенсорный аэратор на кран 1080 градусов",
@@ -31,8 +54,9 @@ TOP_DROPSHIP_QUERIES = [
 if "default_query" not in st.session_state:
     st.session_state["default_query"] = random.choice(TOP_DROPSHIP_QUERIES)
 
+# Загружаем сохраненное из файла
 if "favorites" not in st.session_state:
-    st.session_state["favorites"] = []
+    st.session_state["favorites"] = load_favorites()
 
 if "results" not in st.session_state:
     st.session_state["results"] = []
@@ -265,9 +289,11 @@ with tab_list:
                         if st.button(btn_label, key=f"fav_btn_{row_idx}_{item['Ссылка'][-10:]}"):
                             if is_in_fav:
                                 st.session_state["favorites"] = [f for f in st.session_state["favorites"] if f["Ссылка"] != item["Ссылка"]]
+                                save_favorites(st.session_state["favorites"])
                                 st.toast("Удалено из Избранного", icon="🗑️")
                             else:
                                 st.session_state["favorites"].append(item)
+                                save_favorites(st.session_state["favorites"])
                                 st.toast("Добавлено в Избранное! ⭐", icon="✅")
                             st.rerun()
 
@@ -285,12 +311,20 @@ with tab_list:
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# === ВКЛАДКА 2: ИЗБРАННОЕ (ВСЕГДА ДОСТУПНА) ===
+# === ВКЛАДКА 2: ИЗБРАННОЕ (СОХРАНЯЕТСЯ В ФАЙЛ) ===
 with tab_fav:
-    st.subheader("⭐ Отобранные товары для рекламы")
-    
+    c_fav_head, c_fav_clear = st.columns([4, 1])
+    with c_fav_head:
+        st.subheader("⭐ Отобранные товары для рекламы")
+    with c_fav_clear:
+        if st.session_state["favorites"]:
+            if st.button("🧹 Очистить всё"):
+                st.session_state["favorites"] = []
+                save_favorites([])
+                st.rerun()
+
     if not st.session_state["favorites"]:
-        st.info("Список избранного пока пуст. Нажимайте кнопку **'⭐ В избранное'** возле интересующих товаров в списке.")
+        st.info("Список избранного пока пуст. Нажимайте кнопку **'⭐ В избранное'** возле товаров. Все данные будут сохраняться автоматически.")
     else:
         fav_df = pd.DataFrame(st.session_state["favorites"])
         st.write("Отметьте галочками **до 3-х лучших товаров** для запуска в рекламу:")
@@ -310,6 +344,7 @@ with tab_fav:
             with f_c4:
                 if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
                     st.session_state["favorites"].pop(f_idx)
+                    save_favorites(st.session_state["favorites"])
                     st.rerun()
             st.markdown("---")
 
