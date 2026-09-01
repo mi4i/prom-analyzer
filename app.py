@@ -7,10 +7,10 @@ import re
 import io
 from collections import Counter
 import plotly.express as px
+from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# Кастомные стили таблицы
 st.markdown("""
 <style>
     .table-header {
@@ -123,6 +123,9 @@ if st.button("🚀 Запустить полное сканирование", ty
     
     stop_words_filter = [w.strip().lower() for w in exclude_keywords.split(",") if w.strip()]
     stop_sellers_filter = [s.strip().lower() for s in exclude_sellers.split(",") if s.strip()]
+    
+    # URL-кодирование поискового запроса для безопасной передачи в заголовках Referer
+    encoded_query = quote(query)
 
     for page in range(1, pages_count + 1):
         status_box.info(f"⏳ Сканирование страницы {page} из {pages_count}...")
@@ -130,7 +133,7 @@ if st.button("🚀 Запустить полное сканирование", ty
         params = {"search_term": query, "page": page}
         
         if page > 1:
-            session.headers.update({"Referer": f"https://prom.ua/ua/search?search_term={query}&page={page-1}"})
+            session.headers.update({"Referer": f"https://prom.ua/ua/search?search_term={encoded_query}&page={page-1}"})
 
         try:
             res = session.get(url, params=params, timeout=12)
@@ -152,7 +155,6 @@ if st.button("🚀 Запустить полное сканирование", ty
                         digits = "".join(c for c in raw_price if c.isdigit())
                         price = int(digits) if digits else 0
                         
-                        # Фильтры
                         if price_filter_enabled:
                             if min_price_input > 0 and price < min_price_input:
                                 continue
@@ -210,7 +212,6 @@ if "results" in st.session_state and st.session_state["results"]:
     
     st.markdown("---")
     
-    # Метрики
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Собрано товаров", len(df))
     c2.metric("Средняя цена", f"{int(df['Цена'].mean()):,} грн".replace(",", " "))
@@ -219,7 +220,6 @@ if "results" in st.session_state and st.session_state["results"]:
     
     st.markdown("---")
 
-    # Вкладки: Таблица, Аналитика, SEO, Экспорт
     tab_list, tab_analytics, tab_seo, tab_export = st.tabs([
         "📋 Список товаров", 
         "📊 Аналитика ниши", 
@@ -227,7 +227,6 @@ if "results" in st.session_state and st.session_state["results"]:
         "💾 Экспорт данных"
     ])
 
-    # === ВКЛАДКА 1: Таблица и быстрые фильтры ===
     with tab_list:
         f_col1, f_col2 = st.columns([2, 1])
         with f_col1:
@@ -235,7 +234,6 @@ if "results" in st.session_state and st.session_state["results"]:
         with f_col2:
             sort_option = st.selectbox("Сортировка:", ["По умолчанию", "Сначала дешевые", "Сначала дорогие", "По продавцу"])
 
-        # Фильтрация и сортировка на лету
         view_df = df.copy()
         if search_filter:
             view_df = view_df[view_df["Название"].str.contains(search_filter, case=False, na=False)]
@@ -281,7 +279,6 @@ if "results" in st.session_state and st.session_state["results"]:
             """
         st.markdown(html_content, unsafe_allow_html=True)
 
-    # === ВКЛАДКА 2: Графики и аналитика ниши ===
     with tab_analytics:
         st.subheader("📈 Распределение цен в нише")
         fig_hist = px.histogram(df, x="Цена", nbins=20, title="Гистограмма цен товаров",
@@ -297,15 +294,12 @@ if "results" in st.session_state and st.session_state["results"]:
         fig_sellers.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig_sellers, use_container_width=True)
 
-    # === ВКЛАДКА 3: SEO-анализ заголовков ===
     with tab_seo:
         st.subheader("🔑 Часто используемые слова в названиях (SEO)")
-        
-        # Разбор слов и удаление стоп-слов
         raw_text = " ".join(df["Название"].tolist()).lower()
         words = re.findall(r'\b[a-zA-ua-яєії0-9]{3,}\b', raw_text)
         
-        stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'для', 'пластиковый', 'набор', 'шт', 'грн'}
+        stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'пластиковый', 'набор', 'шт', 'грн'}
         filtered_words = [w for w in words if w not in stop_words and not w.isdigit()]
         
         word_counts = Counter(filtered_words).most_common(15)
@@ -315,13 +309,10 @@ if "results" in st.session_state and st.session_state["results"]:
         st.plotly_chart(fig_words, use_container_width=True)
         st.dataframe(seo_df, use_container_width=True)
 
-    # === ВКЛАДКА 4: Экспорт файлов ===
     with tab_export:
         st.subheader("📥 Выгрузить отчет")
-        
         col_exp1, col_exp2 = st.columns(2)
         
-        # Экспорт CSV
         with col_exp1:
             csv_data = df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
@@ -332,7 +323,6 @@ if "results" in st.session_state and st.session_state["results"]:
                 use_container_width=True
             )
         
-        # Экспорт Excel (.xlsx)
         with col_exp2:
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
