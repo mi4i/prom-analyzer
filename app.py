@@ -39,9 +39,11 @@ if st.button("Запустить сканирование", type="primary"):
                     name_el = b.select_one('[data-qaid="product_name"]')
                     price_el = b.select_one('[data-qaid="product_price"]')
                     link_el = b.select_one('a')
-                    supplier_el = b.select_one('[data-qaid="company_name"]') or b.select_one('[data-qaid="company_link"]')
                     img_el = b.select_one('img')
                     sales_el = b.select_one('[data-qaid="rating_info"]') or b.select_one('[data-qaid="reviews_count"]')
+                    
+                    # Извлечение данных продавца и ссылки на его магазин
+                    supplier_el = b.select_one('[data-qaid="company_link"]') or b.select_one('[data-qaid="company_name"]')
                     
                     if name_el and price_el:
                         name = name_el.text.strip()
@@ -60,6 +62,17 @@ if st.button("Запустить сканирование", type="primary"):
                         href = link_el.get("href", "") if link_el else ""
                         full_link = f"https://prom.ua{href}" if href.startswith("/") else href
                         
+                        # Парсинг продавца и ссылки на его каталог
+                        supplier_name = "Продавец не указан"
+                        supplier_link = ""
+                        if supplier_el:
+                            supplier_name = supplier_el.text.strip()
+                            s_href = supplier_el.get("href", "") if supplier_el.name == "a" else ""
+                            if not s_href and supplier_el.parent and supplier_el.parent.name == "a":
+                                s_href = supplier_el.parent.get("href", "")
+                            if s_href:
+                                supplier_link = f"https://prom.ua{s_href}" if s_href.startswith("/") else s_href
+
                         # Парсинг картинки
                         img_url = ""
                         if img_el:
@@ -67,13 +80,13 @@ if st.button("Запустить сканирование", type="primary"):
                             if img_url.startswith("//"):
                                 img_url = "https:" + img_url
 
-                        supplier = supplier_el.text.strip() if supplier_el else "Продавец не указан"
                         sales_info = sales_el.text.strip() if sales_el else "Нет отзывов"
 
                         products.append({
                             "Название": name,
                             "Цена (грн)": price,
-                            "Поставщик": supplier,
+                            "Поставщик": supplier_name,
+                            "Ссылка_поставщика": supplier_link,
                             "Рейтинг/Отзывы": sales_info,
                             "Картинка": img_url,
                             "Ссылка": full_link
@@ -86,7 +99,7 @@ if st.button("Запустить сканирование", type="primary"):
         
     st.session_state["results"] = products
 
-# Отображение результатов
+# Отображение результатов в виде таблицы
 if "results" in st.session_state and st.session_state["results"]:
     data = st.session_state["results"]
     df = pd.DataFrame(data)
@@ -98,24 +111,56 @@ if "results" in st.session_state and st.session_state["results"]:
     c3.metric("Диапазон цен", f"{df['Цена (грн)'].min()} - {df['Цена (грн)'].max()} грн")
     st.markdown("---")
     
-    # Отображение карточек
-    cols = st.columns(3)
-    for idx, item in enumerate(data):
-        with cols[idx % 3]:
-            with st.container(border=True):
-                # Безопасный вывод изображения
-                if item["Картинка"] and item["Картинка"].startswith("http"):
-                    try:
-                        st.image(item["Картинка"], use_container_width=True)
-                    except Exception:
-                        st.caption("🖼️ Изображение недоступно")
-                
-                st.markdown(f"**[{item['Название']}]({item['Ссылка']})**")
-                st.markdown(f"### {item['Цена (грн)']} грн")
-                st.write(f"🏢 **Продавец:** {item['Поставщик']}")
-                st.caption(f"⭐ **Состояние/Отзывы:** {item['Рейтинг/Отзывы']}")
+    # Шапка горизонтальной таблицы
+    h_col1, h_col2, h_col3, h_col4, h_col5 = st.columns([1, 4, 2, 1.5, 2])
+    with h_col1:
+        st.markdown("**Фото**")
+    with h_col2:
+        st.markdown("**Товар**")
+    with h_col3:
+        st.markdown("**Продавец**")
+    with h_col4:
+        st.markdown("**Цена**")
+    with h_col5:
+        st.markdown("**Отзывы / Рейтинг**")
+    
+    st.divider()
 
-    st.markdown("---")
+    # Строки таблицы
+    for item in data:
+        row_col1, row_col2, row_col3, row_col4, row_col5 = st.columns([1, 4, 2, 1.5, 2])
+        
+        # 1. Фотография (миниатюра 70px)
+        with row_col1:
+            if item["Картинка"] and item["Картинка"].startswith("http"):
+                try:
+                    st.image(item["Картинка"], width=70)
+                except Exception:
+                    st.caption("🖼️ N/A")
+            else:
+                st.caption("🖼️ N/A")
+                
+        # 2. Название со ссылкой
+        with row_col2:
+            st.markdown(f"[{item['Название']}]({item['Ссылка']})")
+            
+        # 3. Продавец со ссылкой на каталог магазина
+        with row_col3:
+            if item["Ссылка_поставщика"]:
+                st.markdown(f"[{item['Поставщик']}]({item['Ссылка_поставщика']})")
+            else:
+                st.write(item["Поставщик"])
+                
+        # 4. Цена
+        with row_col4:
+            st.markdown(f"**{item['Цена (грн)']} грн**")
+            
+        # 5. Рейтинг / Отзывы
+        with row_col5:
+            st.caption(item["Рейтинг/Отзывы"])
+            
+        st.divider()
+
     csv_data = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(
         label="📥 Скачать CSV-отчет",
