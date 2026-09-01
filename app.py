@@ -98,13 +98,17 @@ if "results" in st.session_state and st.session_state["results"]:
     c3.metric("Диапазон цен", f"{df['Цена (грн)'].min()} - {df['Цена (грн)'].max()} грн")
     st.markdown("---")
     
-    # Визуализация карточек (3 карточки в ряд)
+    # Отображение карточек
     cols = st.columns(3)
     for idx, item in enumerate(data):
         with cols[idx % 3]:
             with st.container(border=True):
-                if item["Картинка"]:
-                    st.image(item["Картинка"], use_column_width=True)
+                # Безопасный вывод изображения
+                if item["Картинка"] and item["Картинка"].startswith("http"):
+                    try:
+                        st.image(item["Картинка"], use_container_width=True)
+                    except Exception:
+                        st.caption("🖼️ Изображение недоступно")
                 
                 st.markdown(f"**[{item['Название']}]({item['Ссылка']})**")
                 st.markdown(f"### {item['Цена (грн)']} грн")
@@ -116,7 +120,7 @@ if "results" in st.session_state and st.session_state["results"]:
     st.download_button(
         label="📥 Скачать CSV-отчет",
         data=csv_data,
-        file_name=f"prom_report.csv",
+        file_name="prom_report.csv",
         mime="text/csv"
     )
 elif "results" in st.session_state:
