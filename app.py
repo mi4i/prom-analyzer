@@ -131,11 +131,11 @@ st.markdown("""
         padding: 5px 12px;
         font-size: 0.75rem;
         font-weight: 600;
-        color: #059669;
+        color: #059669 !important;
         border: 1px solid #D1FAE5;
         border-radius: 6px;
         background: #ECFDF5;
-        text-decoration: none;
+        text-decoration: none !important;
         cursor: pointer;
         transition: background 0.2s;
     }
@@ -322,10 +322,9 @@ if "results" in st.session_state and st.session_state["results"]:
             store_html = f'<a href="{item["Ссылка_поставщика"]}" target="_blank" class="store-link">"{item["Поставщик"]}"</a>' if item["Ссылка_поставщика"] else f'<span class="store-link">"{item["Поставщик"]}"</span>'
             target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
             
-            # Экранирование кавычек для корректной работы в JS
-            clean_title = item['Название'].replace("'", "\\'").replace('"', '\\"')
-            msg_text = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
-            msg_text_js = msg_text.replace("'", "\\'").replace('"', '\\"')
+            # Безопасное формирование и кодирование текста обращения
+            msg_raw = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
+            msg_encoded = quote(msg_raw)
 
             html_content += f"""
             <div class="product-row">
@@ -336,11 +335,7 @@ if "results" in st.session_state and st.session_state["results"]:
                         <div class="product-sub">{item['Статус']} · <a href="{item['Ссылка']}" target="_blank">открыть на Prom.ua ↗</a></div>
                         <div class="btn-group">
                             <a href="{item['Ссылка']}" target="_blank" class="btn-action">✦ Анализировать</a>
-                            <button onclick="
-                                navigator.clipboard.writeText('{msg_text_js}');
-                                alert('Текст звернення скопійовано! Переходимо на сторінку продавця...');
-                                window.open('{target_url}', '_blank');
-                            " class="btn-dropship">🤝 Запрос на дропшиппинг</button>
+                            <a href="{target_url}" target="_blank" class="btn-dropship" onclick="navigator.clipboard.writeText(decodeURIComponent('{msg_encoded}'));">🤝 Запрос на дропшиппинг</a>
                         </div>
                     </div>
                 </div>
