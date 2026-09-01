@@ -12,7 +12,6 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# Инициализация состояний
 TOP_DROPSHIP_QUERIES = [
     "подсветка для унитаза с датчиком движения",
     "сенсорный аэратор на кран 1080 градусов",
@@ -34,128 +33,22 @@ if "default_query" not in st.session_state:
 if "favorites" not in st.session_state:
     st.session_state["favorites"] = []
 
-# Обработка добавления/удаления из избранного через Query Params
-if "add_fav" in st.query_params:
-    try:
-        fav_idx = int(st.query_params["add_fav"])
-        if "results" in st.session_state and 0 <= fav_idx < len(st.session_state["results"]):
-            item = st.session_state["results"][fav_idx]
-            if not any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"]):
-                st.session_state["favorites"].append(item)
-                st.toast("Товар добавлен в Избранное! ⭐", icon="✅")
-        st.query_params.clear()
-    except Exception:
-        pass
-
-if "rem_fav" in st.query_params:
-    try:
-        rem_idx = int(st.query_params["rem_fav"])
-        if 0 <= rem_idx < len(st.session_state["favorites"]):
-            st.session_state["favorites"].pop(rem_idx)
-            st.toast("Товар удален из Избранного", icon="🗑️")
-        st.query_params.clear()
-    except Exception:
-        pass
-
 st.markdown("""
 <style>
-    .table-header {
-        display: flex;
-        padding: 12px 16px;
-        background-color: #FAF9FE;
+    .product-card {
+        padding: 14px;
         border: 1px solid #EAE6F8;
-        border-radius: 8px 8px 0 0;
-        font-weight: 700;
-        font-size: 0.75rem;
-        color: #79768A;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-    }
-    .product-row {
-        display: flex;
-        align-items: flex-start;
-        padding: 16px;
-        border-left: 1px solid #EAE6F8;
-        border-right: 1px solid #EAE6F8;
-        border-bottom: 1px solid #EAE6F8;
+        border-radius: 10px;
         background-color: #FFFFFF;
+        margin-bottom: 12px;
+        transition: background 0.2s;
     }
-    .product-row:hover { background-color: #FBFBFE; }
-    .col-product { flex: 3.5; display: flex; gap: 16px; }
-    .col-price { flex: 1; font-weight: 700; font-size: 1.1rem; color: #111827; padding-top: 4px; }
-    .col-store { flex: 1.5; padding-top: 4px; }
+    .product-card:hover { background-color: #FBFBFE; }
     
-    .product-img {
-        width: 85px;
-        height: 85px;
-        object-fit: contain;
-        border-radius: 8px;
-        border: 1px solid #F0F0F5;
-        background: #FFFFFF;
-        flex-shrink: 0;
-        transition: transform 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
-        position: relative;
-        z-index: 1;
-        cursor: pointer;
-    }
-    .product-img:hover {
-        transform: scale(2.4);
-        z-index: 100;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-    }
-
-    .product-title {
-        font-weight: 700;
-        font-size: 0.98rem;
-        color: #111827 !important;
-        text-decoration: none;
-        line-height: 1.35;
-        display: block;
-        margin-bottom: 4px;
-    }
-    .product-title:hover { color: #635BFF !important; }
-    .product-sub { font-size: 0.8rem; color: #6B7280; margin-bottom: 8px; }
-    .product-sub a { color: #635BFF; text-decoration: none; }
-    .store-link {
-        font-weight: 600;
-        font-size: 0.9rem;
-        color: #374151 !important;
-        text-decoration: none;
-    }
-    .store-link:hover { color: #635BFF !important; }
-    
-    .btn-group {
-        display: flex;
-        gap: 8px;
-        margin-top: 8px;
-        flex-wrap: wrap;
-    }
-    .btn-action {
-        display: inline-block;
-        padding: 5px 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: #5850EC !important;
-        border: 1px solid #E0E0FE;
-        border-radius: 6px;
-        background: #F5F5FE;
-        text-decoration: none !important;
-    }
-    .btn-fav {
-        display: inline-block;
-        padding: 5px 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: #D97706 !important;
-        border: 1px solid #FEF3C7;
-        border-radius: 6px;
-        background: #FFFBEB;
-        text-decoration: none !important;
-    }
     .btn-dropship {
         display: inline-block;
-        padding: 5px 10px;
-        font-size: 0.75rem;
+        padding: 6px 14px;
+        font-size: 0.8rem;
         font-weight: 600;
         color: #059669 !important;
         border: 1px solid #D1FAE5;
@@ -164,6 +57,7 @@ st.markdown("""
         text-decoration: none !important;
         cursor: pointer;
     }
+    .btn-dropship:hover { background: #D1FAE5; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -328,108 +222,106 @@ if "results" in st.session_state and st.session_state["results"]:
         elif sort_option == "По продавцу":
             view_df = view_df.sort_values(by="Поставщик")
 
-        st.markdown("""
-        <div class="table-header">
-            <div class="col-product">ТОВАР</div>
-            <div class="col-price">ЦЕНА</div>
-            <div class="col-store">МАГАЗИН</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        html_content = ""
-        for idx, item in view_df.iterrows():
-            store_html = f'<a href="{item["Ссылка_поставщика"]}" target="_blank" class="store-link">"{item["Поставщик"]}"</a>' if item["Ссылка_поставщика"] else f'<span class="store-link">"{item["Поставщик"]}"</span>'
-            target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
-            
-            msg_raw = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
-            msg_encoded = quote(msg_raw)
+        for row_idx, item in view_df.iterrows():
+            with st.container():
+                st.markdown('<div class="product-card">', unsafe_allow_html=True)
+                col_img, col_main, col_price, col_seller = st.columns([1, 4.5, 1.5, 2])
+                
+                with col_img:
+                    st.image(item["Картинка"], use_container_width=True)
+                    
+                with col_main:
+                    st.markdown(f"**[{item['Название']}]({item['Ссылка']})**")
+                    st.caption(f"{item['Статус']} · [Открыть карточку на Prom.ua ↗]({item['Ссылка']})")
+                    
+                    target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
+                    msg_raw = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
+                    msg_encoded = quote(msg_raw)
 
-            # Надежный JS-код гарантированного копирования текста перед переходом по ссылке
-            js_copy_click = f"""
-                event.preventDefault();
-                const link = this.href;
-                const txt = decodeURIComponent('{msg_encoded}');
-                if (navigator.clipboard && navigator.clipboard.writeText) {{
-                    navigator.clipboard.writeText(txt).then(() => {{
-                        window.open(link, '_blank');
-                    }}).catch(() => {{
-                        window.open(link, '_blank');
-                    }});
-                }} else {{
-                    window.open(link, '_blank');
-                }}
-            """
+                    js_copy = f"""
+                        event.preventDefault();
+                        const link = this.href;
+                        const txt = decodeURIComponent('{msg_encoded}');
+                        if (navigator.clipboard) {{
+                            navigator.clipboard.writeText(txt).then(() => window.open(link, '_blank')).catch(() => window.open(link, '_blank'));
+                        }} else {{
+                            window.open(link, '_blank');
+                        }}
+                    """
+                    
+                    b_col1, b_col2 = st.columns([1.2, 2])
+                    
+                    with b_col1:
+                        is_in_fav = any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"])
+                        btn_label = "✅ В избранном" if is_in_fav else "⭐ В избранное"
+                        
+                        if st.button(btn_label, key=f"fav_{row_idx}_{item['Ссылка'][:15]}"):
+                            if is_in_fav:
+                                st.session_state["favorites"] = [f for f in st.session_state["favorites"] if f["Ссылка"] != item["Ссылка"]]
+                                st.toast("Удалено из Избранного", icon="🗑️")
+                            else:
+                                st.session_state["favorites"].append(item)
+                                st.toast("Добавлено в Избранное! ⭐", icon="✅")
+                            st.rerun()
 
-            is_in_fav = any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"])
-            fav_btn_label = "✅ В избранном" if is_in_fav else "⭐ В избранное"
+                    with b_col2:
+                        st.markdown(f'<a href="{target_url}" target="_blank" class="btn-dropship" onclick="{js_copy}">🤝 Запрос на дропшиппинг</a>', unsafe_allow_html=True)
 
-            html_content += f"""
-            <div class="product-row">
-                <div class="col-product">
-                    <img src="{item['Картинка']}" class="product-img" alt="Product Image">
-                    <div>
-                        <a href="{item['Ссылка']}" target="_blank" class="product-title">{item['Название']}</a>
-                        <div class="product-sub">{item['Статус']} · <a href="{item['Ссылка']}" target="_blank">открыть на Prom ↗</a></div>
-                        <div class="btn-group">
-                            <a href="?add_fav={idx}" class="btn-fav">{fav_btn_label}</a>
-                            <a href="{target_url}" target="_blank" class="btn-dropship" onclick="{js_copy_click}">🤝 Запрос на дропшиппинг</a>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-price">
-                    {item['Цена']} грн
-                </div>
-                <div class="col-store">
-                    {store_html}
-                </div>
-            </div>
-            """
-        st.markdown(html_content, unsafe_allow_html=True)
+                with col_price:
+                    st.markdown(f"### {item['Цена']} грн")
+
+                with col_seller:
+                    if item["Ссылка_поставщика"]:
+                        st.markdown(f"**Продавец:** [{item['Поставщик']}]({item['Ссылка_поставщика']})")
+                    else:
+                        st.markdown(f"**Продавец:** {item['Поставщик']}")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
 
     with tab_fav:
-        st.subheader("⭐ Шорт-лист отобранных товаров")
+        st.subheader("⭐ Отобранные товары для детального анализа")
         
         if not st.session_state["favorites"]:
-            st.info("Вы пока не добавили ни одного товара в избранное. Нажимайте кнопку '⭐ В избранное' в общем списке.")
+            st.info("В избранном пока ничего нет. Добавляйте товары кнопкой '⭐ В избранное'.")
         else:
             fav_df = pd.DataFrame(st.session_state["favorites"])
-            
-            st.write("Отметьте **до 3-х товаров**, которые планируете запускать в тестовую рекламу (Meta Ads / TikTok):")
+            st.write("Отметьте **до 3-х товаров**, которые запустите в рекламу:")
             
             selected_for_ads = []
             for f_idx, f_item in fav_df.iterrows():
-                f_col1, f_col2, f_col3, f_col4 = st.columns([0.5, 1, 4, 1.5])
+                f_c1, f_c2, f_c3, f_c4 = st.columns([0.5, 1, 4, 1.5])
                 
-                with f_col1:
-                    is_selected = st.checkbox("", key=f"fav_chk_{f_idx}")
-                    if is_selected:
+                with f_c1:
+                    if st.checkbox("", key=f"chk_fav_{f_idx}"):
                         selected_for_ads.append(f_item)
-                with f_col2:
-                    st.image(f_item["Картинка"], width=60)
-                with f_col3:
+                with f_c2:
+                    st.image(f_item["Картинка"], width=65)
+                with f_c3:
                     st.markdown(f"**[{f_item['Название']}]({f_item['Ссылка']})**")
                     st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
-                with f_col4:
-                    st.markdown(f"[🗑️ Удалить](?rem_fav={f_idx})")
+                with f_c4:
+                    if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
+                        st.session_state["favorites"].pop(f_idx)
+                        st.rerun()
                 st.markdown("---")
 
             if len(selected_for_ads) > 3:
-                st.warning("⚠️ Вы выбрали больше 3 товаров. Для фокусного теста рекомендуется оставить максимум 3 оффера!")
+                st.warning("⚠️ Выбрано больше 3-х товаров. Рекомендуется сфокусироваться максимум на 3 офферах.")
             
             if selected_for_ads:
-                st.subheader("🚀 Выбранный ТОП для тестирования")
+                st.subheader("🚀 Ваша тройка для рекламного теста")
                 top_df = pd.DataFrame(selected_for_ads)
                 st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
 
     with tab_analytics:
         st.subheader("📈 Распределение цен в нише")
-        fig_hist = px.histogram(df, x="Цена", nbins=20, title="Гистограмма цен товаров",
-                                labels={"Цена": "Цена (грн)", "count": "Количество товаров"},
+        fig_hist = px.histogram(df, x="Цена", nbins=20, title="Гистограмма цен",
+                                labels={"Цена": "Цена (грн)", "count": "Количество"},
                                 color_discrete_sequence=['#635BFF'])
         st.plotly_chart(fig_hist, use_container_width=True)
 
     with tab_seo:
-        st.subheader("🔑 Часто используемые слова в названиях (SEO)")
+        st.subheader("🔑 Популярные ключевые слова")
         raw_text = " ".join(df["Название"].tolist()).lower()
         words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', raw_text)
         stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'пластиковый', 'набор', 'шт', 'грн'}
