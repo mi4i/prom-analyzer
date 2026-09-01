@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# Пул актуальных Wоw-товаров (бытовые проблемы, высокий ROI)
+# Инициализация состояний
 TOP_DROPSHIP_QUERIES = [
     "подсветка для унитаза с датчиком движения",
     "сенсорный аэратор на кран 1080 градусов",
@@ -30,6 +30,32 @@ TOP_DROPSHIP_QUERIES = [
 
 if "default_query" not in st.session_state:
     st.session_state["default_query"] = random.choice(TOP_DROPSHIP_QUERIES)
+
+if "favorites" not in st.session_state:
+    st.session_state["favorites"] = []
+
+# Обработка добавления/удаления из избранного через Query Params
+if "add_fav" in st.query_params:
+    try:
+        fav_idx = int(st.query_params["add_fav"])
+        if "results" in st.session_state and 0 <= fav_idx < len(st.session_state["results"]):
+            item = st.session_state["results"][fav_idx]
+            if not any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"]):
+                st.session_state["favorites"].append(item)
+                st.toast("Товар добавлен в Избранное! ⭐", icon="✅")
+        st.query_params.clear()
+    except Exception:
+        pass
+
+if "rem_fav" in st.query_params:
+    try:
+        rem_idx = int(st.query_params["rem_fav"])
+        if 0 <= rem_idx < len(st.session_state["favorites"]):
+            st.session_state["favorites"].pop(rem_idx)
+            st.toast("Товар удален из Избранного", icon="🗑️")
+        st.query_params.clear()
+    except Exception:
+        pass
 
 st.markdown("""
 <style>
@@ -97,16 +123,6 @@ st.markdown("""
         text-decoration: none;
     }
     .store-link:hover { color: #635BFF !important; }
-    .badge-status {
-        display: inline-block;
-        padding: 3px 8px;
-        font-size: 0.75rem;
-        background: #F3F4F6;
-        color: #4B5563;
-        border-radius: 6px;
-        border: 1px solid #E5E7EB;
-        margin-top: 4px;
-    }
     
     .btn-group {
         display: flex;
@@ -116,19 +132,29 @@ st.markdown("""
     }
     .btn-action {
         display: inline-block;
-        padding: 5px 12px;
+        padding: 5px 10px;
         font-size: 0.75rem;
         font-weight: 600;
-        color: #5850EC;
+        color: #5850EC !important;
         border: 1px solid #E0E0FE;
         border-radius: 6px;
         background: #F5F5FE;
-        text-decoration: none;
-        cursor: pointer;
+        text-decoration: none !important;
+    }
+    .btn-fav {
+        display: inline-block;
+        padding: 5px 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #D97706 !important;
+        border: 1px solid #FEF3C7;
+        border-radius: 6px;
+        background: #FFFBEB;
+        text-decoration: none !important;
     }
     .btn-dropship {
         display: inline-block;
-        padding: 5px 12px;
+        padding: 5px 10px;
         font-size: 0.75rem;
         font-weight: 600;
         color: #059669 !important;
@@ -137,10 +163,6 @@ st.markdown("""
         background: #ECFDF5;
         text-decoration: none !important;
         cursor: pointer;
-        transition: background 0.2s;
-    }
-    .btn-dropship:hover {
-        background: #D1FAE5;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -195,7 +217,6 @@ if st.button("🚀 Запустить полное сканирование", ty
             res = session.get(url, params=params, timeout=12)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                
                 blocks = (
                     soup.select('[data-qaid="product_block"]') or 
                     soup.select('[data-qaid="product_card"]') or 
@@ -275,20 +296,18 @@ if "results" in st.session_state and st.session_state["results"]:
     df = pd.DataFrame(data)
     
     st.markdown("---")
-    
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Собрано товаров", len(df))
     c2.metric("Средняя цена", f"{int(df['Цена'].mean()):,} грн".replace(",", " "))
-    c3.metric("Медианная цена", f"{int(df['Цена'].median()):,} грн".replace(",", " "))
+    c3.metric("В Избранном", len(st.session_state["favorites"]))
     c4.metric("Диапазон цен", f"{df['Цена'].min()} - {df['Цена'].max()} грн")
-    
     st.markdown("---")
 
-    tab_list, tab_analytics, tab_seo, tab_export = st.tabs([
+    tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
         "📋 Список товаров", 
+        f"⭐ Избранное & Топ-3 ({len(st.session_state['favorites'])})",
         "📊 Аналитика ниши", 
-        "🔍 SEO & Ключевые слова", 
-        "💾 Экспорт данных"
+        "🔍 SEO & Ключевые слова"
     ])
 
     with tab_list:
@@ -318,13 +337,31 @@ if "results" in st.session_state and st.session_state["results"]:
         """, unsafe_allow_html=True)
         
         html_content = ""
-        for _, item in view_df.iterrows():
+        for idx, item in view_df.iterrows():
             store_html = f'<a href="{item["Ссылка_поставщика"]}" target="_blank" class="store-link">"{item["Поставщик"]}"</a>' if item["Ссылка_поставщика"] else f'<span class="store-link">"{item["Поставщик"]}"</span>'
             target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
             
-            # Безопасное формирование и кодирование текста обращения
             msg_raw = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
             msg_encoded = quote(msg_raw)
+
+            # Надежный JS-код гарантированного копирования текста перед переходом по ссылке
+            js_copy_click = f"""
+                event.preventDefault();
+                const link = this.href;
+                const txt = decodeURIComponent('{msg_encoded}');
+                if (navigator.clipboard && navigator.clipboard.writeText) {{
+                    navigator.clipboard.writeText(txt).then(() => {{
+                        window.open(link, '_blank');
+                    }}).catch(() => {{
+                        window.open(link, '_blank');
+                    }});
+                }} else {{
+                    window.open(link, '_blank');
+                }}
+            """
+
+            is_in_fav = any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"])
+            fav_btn_label = "✅ В избранном" if is_in_fav else "⭐ В избранное"
 
             html_content += f"""
             <div class="product-row">
@@ -332,10 +369,10 @@ if "results" in st.session_state and st.session_state["results"]:
                     <img src="{item['Картинка']}" class="product-img" alt="Product Image">
                     <div>
                         <a href="{item['Ссылка']}" target="_blank" class="product-title">{item['Название']}</a>
-                        <div class="product-sub">{item['Статус']} · <a href="{item['Ссылка']}" target="_blank">открыть на Prom.ua ↗</a></div>
+                        <div class="product-sub">{item['Статус']} · <a href="{item['Ссылка']}" target="_blank">открыть на Prom ↗</a></div>
                         <div class="btn-group">
-                            <a href="{item['Ссылка']}" target="_blank" class="btn-action">✦ Анализировать</a>
-                            <a href="{target_url}" target="_blank" class="btn-dropship" onclick="navigator.clipboard.writeText(decodeURIComponent('{msg_encoded}'));">🤝 Запрос на дропшиппинг</a>
+                            <a href="?add_fav={idx}" class="btn-fav">{fav_btn_label}</a>
+                            <a href="{target_url}" target="_blank" class="btn-dropship" onclick="{js_copy_click}">🤝 Запрос на дропшиппинг</a>
                         </div>
                     </div>
                 </div>
@@ -344,12 +381,45 @@ if "results" in st.session_state and st.session_state["results"]:
                 </div>
                 <div class="col-store">
                     {store_html}
-                    <br>
-                    <span class="badge-status">Проверен</span>
                 </div>
             </div>
             """
         st.markdown(html_content, unsafe_allow_html=True)
+
+    with tab_fav:
+        st.subheader("⭐ Шорт-лист отобранных товаров")
+        
+        if not st.session_state["favorites"]:
+            st.info("Вы пока не добавили ни одного товара в избранное. Нажимайте кнопку '⭐ В избранное' в общем списке.")
+        else:
+            fav_df = pd.DataFrame(st.session_state["favorites"])
+            
+            st.write("Отметьте **до 3-х товаров**, которые планируете запускать в тестовую рекламу (Meta Ads / TikTok):")
+            
+            selected_for_ads = []
+            for f_idx, f_item in fav_df.iterrows():
+                f_col1, f_col2, f_col3, f_col4 = st.columns([0.5, 1, 4, 1.5])
+                
+                with f_col1:
+                    is_selected = st.checkbox("", key=f"fav_chk_{f_idx}")
+                    if is_selected:
+                        selected_for_ads.append(f_item)
+                with f_col2:
+                    st.image(f_item["Картинка"], width=60)
+                with f_col3:
+                    st.markdown(f"**[{f_item['Название']}]({f_item['Ссылка']})**")
+                    st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
+                with f_col4:
+                    st.markdown(f"[🗑️ Удалить](?rem_fav={f_idx})")
+                st.markdown("---")
+
+            if len(selected_for_ads) > 3:
+                st.warning("⚠️ Вы выбрали больше 3 товаров. Для фокусного теста рекомендуется оставить максимум 3 оффера!")
+            
+            if selected_for_ads:
+                st.subheader("🚀 Выбранный ТОП для тестирования")
+                top_df = pd.DataFrame(selected_for_ads)
+                st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
 
     with tab_analytics:
         st.subheader("📈 Распределение цен в нише")
@@ -358,53 +428,12 @@ if "results" in st.session_state and st.session_state["results"]:
                                 color_discrete_sequence=['#635BFF'])
         st.plotly_chart(fig_hist, use_container_width=True)
 
-        st.subheader("🏆 Топ-10 Продавцов по количеству карточек")
-        top_sellers = df["Поставщик"].value_counts().head(10).reset_index()
-        top_sellers.columns = ["Продавец", "Количество товаров"]
-        fig_sellers = px.bar(top_sellers, x="Количество товаров", y="Продавец", orientation='h',
-                             color="Количество товаров", color_continuous_scale="Viridis")
-        fig_sellers.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_sellers, use_container_width=True)
-
     with tab_seo:
         st.subheader("🔑 Часто используемые слова в названиях (SEO)")
         raw_text = " ".join(df["Название"].tolist()).lower()
         words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', raw_text)
-        
         stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'пластиковый', 'набор', 'шт', 'грн'}
         filtered_words = [w for w in words if w not in stop_words and not w.isdigit()]
-        
         word_counts = Counter(filtered_words).most_common(15)
         seo_df = pd.DataFrame(word_counts, columns=["Слово", "Частота"])
-        
-        fig_words = px.bar(seo_df, x="Слово", y="Частота", color="Частота", color_continuous_scale="Purples")
-        st.plotly_chart(fig_words, use_container_width=True)
         st.dataframe(seo_df, use_container_width=True)
-
-    with tab_export:
-        st.subheader("📥 Выгрузить отчет")
-        col_exp1, col_exp2 = st.columns(2)
-        
-        with col_exp1:
-            csv_data = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📄 Скачать CSV-отчет",
-                data=csv_data,
-                file_name="prom_report.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        
-        with col_exp2:
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Prom_Data')
-            excel_data = buffer.getvalue()
-            
-            st.download_button(
-                label="📊 Скачать Excel-отчет (.xlsx)",
-                data=excel_data,
-                file_name="prom_report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
