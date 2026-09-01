@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# Пул актуальных Wоw-товаров (решают бытовую проблему, высокий ROI, нет в Авроре)
+# Пул актуальных Wоw-товаров (бытовые проблемы, высокий ROI)
 TOP_DROPSHIP_QUERIES = [
     "подсветка для унитаза с датчиком движения",
     "сенсорный аэратор на кран 1080 градусов",
@@ -28,7 +28,6 @@ TOP_DROPSHIP_QUERIES = [
     "гибкая насадка на душ с фильтром и турбиной"
 ]
 
-# Выбор случайного товара при каждом запуске/перезагрузке приложения
 if "default_query" not in st.session_state:
     st.session_state["default_query"] = random.choice(TOP_DROPSHIP_QUERIES)
 
@@ -108,9 +107,16 @@ st.markdown("""
         border: 1px solid #E5E7EB;
         margin-top: 4px;
     }
+    
+    .btn-group {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+    }
     .btn-action {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 5px 12px;
         font-size: 0.75rem;
         font-weight: 600;
         color: #5850EC;
@@ -118,7 +124,23 @@ st.markdown("""
         border-radius: 6px;
         background: #F5F5FE;
         text-decoration: none;
-        margin-top: 6px;
+        cursor: pointer;
+    }
+    .btn-dropship {
+        display: inline-block;
+        padding: 5px 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #059669;
+        border: 1px solid #D1FAE5;
+        border-radius: 6px;
+        background: #ECFDF5;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .btn-dropship:hover {
+        background: #D1FAE5;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -127,8 +149,6 @@ st.title("📊 Prom.ua Product & Market Analyzer Pro")
 
 with st.sidebar:
     st.header("⚙️ Поисковый модуль")
-    
-    # Динамическая подстановка трендового товара
     query = st.text_input("Поисковый запрос:", value=st.session_state["default_query"])
     
     if st.button("🎲 Другой трендовый оффер"):
@@ -176,7 +196,6 @@ if st.button("🚀 Запустить полное сканирование", ty
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 
-                # Мульти-селектор для обхода разных типов верстки Prom.ua
                 blocks = (
                     soup.select('[data-qaid="product_block"]') or 
                     soup.select('[data-qaid="product_card"]') or 
@@ -301,7 +320,13 @@ if "results" in st.session_state and st.session_state["results"]:
         html_content = ""
         for _, item in view_df.iterrows():
             store_html = f'<a href="{item["Ссылка_поставщика"]}" target="_blank" class="store-link">"{item["Поставщик"]}"</a>' if item["Ссылка_поставщика"] else f'<span class="store-link">"{item["Поставщик"]}"</span>'
+            target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
             
+            # Экранирование кавычек для корректной работы в JS
+            clean_title = item['Название'].replace("'", "\\'").replace('"', '\\"')
+            msg_text = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
+            msg_text_js = msg_text.replace("'", "\\'").replace('"', '\\"')
+
             html_content += f"""
             <div class="product-row">
                 <div class="col-product">
@@ -309,7 +334,14 @@ if "results" in st.session_state and st.session_state["results"]:
                     <div>
                         <a href="{item['Ссылка']}" target="_blank" class="product-title">{item['Название']}</a>
                         <div class="product-sub">{item['Статус']} · <a href="{item['Ссылка']}" target="_blank">открыть на Prom.ua ↗</a></div>
-                        <a href="{item['Ссылка']}" target="_blank" class="btn-action">✦ Анализировать</a>
+                        <div class="btn-group">
+                            <a href="{item['Ссылка']}" target="_blank" class="btn-action">✦ Анализировать</a>
+                            <button onclick="
+                                navigator.clipboard.writeText('{msg_text_js}');
+                                alert('Текст звернення скопійовано! Переходимо на сторінку продавця...');
+                                window.open('{target_url}', '_blank');
+                            " class="btn-dropship">🤝 Запрос на дропшиппинг</button>
+                        </div>
                     </div>
                 </div>
                 <div class="col-price">
@@ -342,7 +374,7 @@ if "results" in st.session_state and st.session_state["results"]:
     with tab_seo:
         st.subheader("🔑 Часто используемые слова в названиях (SEO)")
         raw_text = " ".join(df["Название"].tolist()).lower()
-        words = re.findall(r'\b[a-zA-ua-яєії0-9]{3,}\b', raw_text)
+        words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', raw_text)
         
         stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'пластиковый', 'набор', 'шт', 'грн'}
         filtered_words = [w for w in words if w not in stop_words and not w.isdigit()]
