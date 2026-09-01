@@ -1,17 +1,15 @@
 import json
 from urllib.parse import quote
 from bs4 import BeautifulSoup
+import cloudscraper
 from google import genai
 from google.genai import types
 import pandas as pd
-import requests
 import streamlit as st
 
-# Настройки страницы Streamlit
 st.set_page_config(
     page_title="Prom.ua Analytics", layout="wide", page_icon="📊"
 )
-
 st.title("📊 Поиск и AI-анализ товаров Prom.ua")
 
 # 1. Авторизация Gemini API
@@ -32,27 +30,26 @@ if not api_key:
 client = genai.Client(api_key=api_key)
 
 
-# 2. Функция парсинга реальных товаров с Prom.ua
+# 2. Функция парсинга с использованием cloudscraper
 def scrape_prom_items(query, limit=10):
-  headers = {
-      "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      ),
-      "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-  }
+  scraper = cloudscraper.create_scraper(
+      browser={"browser": "chrome", "platform": "windows", "desktop": True}
+  )
   url = f"https://prom.ua/ua/search?search_term={quote(query)}"
 
   try:
-    response = requests.get(url, headers=headers, timeout=10)
+    response = scraper.get(url, timeout=15)
     if response.status_code != 200:
-      st.error(f"Ошибка запроса к Prom.ua (код {response.status_code})")
+      st.error(
+          f"Prom.ua вернул статус {response.status_code}. Защита маркетплейса"
+          " блокирует запрос."
+      )
       return []
 
     soup = BeautifulSoup(response.text, "html.parser")
     products = []
 
-    # Находим карточки товаров на Prom.ua
+    # Поиск элементов товаров
     cards = soup.find_all("div", {"data-qaid": "product_presence"}, limit=limit)
 
     for card in cards:
@@ -79,7 +76,9 @@ def scrape_prom_items(query, limit=10):
           price = 0
 
         store = store_elem.text.strip() if store_elem else "Н/Д"
-        link = "https://prom.ua" + title_elem.get("href", "")
+        link = title_elem.get("href", "")
+        if not link.startswith("http"):
+          link = "https://prom.ua" + link
 
         products.append(
             {"title": title, "price": price, "store": store, "link": link}
@@ -87,11 +86,11 @@ def scrape_prom_items(query, limit=10):
 
     return products
   except Exception as e:
-    st.error(f"Сбой при парсинге Prom.ua: {e}")
+    st.error(f"Ошибка при подключении к Prom.ua: {e}")
     return []
 
 
-# 3. AI-анализ через рабочую модель gemini-2.0-flash
+# 3. AI-анализ Gemini
 def analyze_with_ai(product):
   prompt = (
       f"Проанализируй товар для коммерческих продаж/дропшиппинга:"
@@ -113,7 +112,7 @@ def analyze_with_ai(product):
     return {"score": 50, "verdict": f"Ошибка AI: {str(e)}"}
 
 
-# 4. Интерфейс поиска
+# 4. Интерфейс
 search_query = st.text_input(
     "Введите поисковый запрос на Prom.ua:", placeholder="Например: автотовары"
 )
@@ -123,7 +122,7 @@ if st.button("🔎 Найти и проанализировать") and search_q
     items = scrape_prom_items(search_query)
 
   if not items:
-    st.warning("Товары не найдены или Prom.ua ограничил доступ.")
+    st.warning("Товары не найдены или Prom.ua заблокировал IP сервера.")
   else:
     with st.spinner("Анализируем товары с помощью Gemini AI..."):
       analyzed_items = []
@@ -133,8 +132,6 @@ if st.button("🔎 Найти и проанализировать") and search_q
         analyzed_items.append(item)
 
       df = pd.DataFrame(analyzed_items)
-
-      # Отображение результатов
       st.success(f"Успешно проанализировано товаров: {len(df)}")
 
       st.dataframe(
