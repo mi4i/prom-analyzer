@@ -1,0 +1,17 @@
+# Конфигурация и секреты (ТОКЕНЫ НЕ ДОЛЖНЫ ПОПАСТЬ В ГИТ)
+.env
+.env.local
+
+# База данных SQLite и бэкапы
+/data/*.db
+/data/*.sqlite
+/data/backups/
+!data/.gitkeep
+
+# Кэш и временные файлы
+*.log
+.DS_Store
+.idea/
+.vscode/
+vendor/
+__pycache__/
