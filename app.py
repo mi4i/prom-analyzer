@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
+# Инициализация состояний (хранятся между перезапусками)
 TOP_DROPSHIP_QUERIES = [
     "подсветка для унитаза с датчиком движения",
     "сенсорный аэратор на кран 1080 градусов",
@@ -33,6 +34,9 @@ if "default_query" not in st.session_state:
 if "favorites" not in st.session_state:
     st.session_state["favorites"] = []
 
+if "results" not in st.session_state:
+    st.session_state["results"] = []
+
 st.markdown("""
 <style>
     .product-card {
@@ -41,7 +45,6 @@ st.markdown("""
         border-radius: 10px;
         background-color: #FFFFFF;
         margin-bottom: 12px;
-        transition: background 0.2s;
     }
     .product-card:hover { background-color: #FBFBFE; }
     
@@ -63,6 +66,7 @@ st.markdown("""
 
 st.title("📊 Prom.ua Product & Market Analyzer Pro")
 
+# --- Сайдбар с настройками ---
 with st.sidebar:
     st.header("⚙️ Поисковый модуль")
     query = st.text_input("Поисковый запрос:", value=st.session_state["default_query"])
@@ -82,7 +86,12 @@ with st.sidebar:
     exclude_keywords = st.text_input("Исключить слова (через запятую):", "чехол, подставка")
     exclude_sellers = st.text_input("Исключить продавцов (через запятую):", "")
 
-if st.button("🚀 Запустить полное сканирование", type="primary"):
+# --- Запуск сканирования ---
+col_btn1, col_btn2 = st.columns([1, 3])
+with col_btn1:
+    start_scan = st.button("🚀 Запустить сканирование", type="primary", use_container_width=True)
+
+if start_scan:
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -184,34 +193,32 @@ if st.button("🚀 Запустить полное сканирование", ty
         
     status_box.empty()
     st.session_state["results"] = products
+    st.rerun()
 
-if "results" in st.session_state and st.session_state["results"]:
-    data = st.session_state["results"]
-    df = pd.DataFrame(data)
-    
-    st.markdown("---")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Собрано товаров", len(df))
-    c2.metric("Средняя цена", f"{int(df['Цена'].mean()):,} грн".replace(",", " "))
-    c3.metric("В Избранном", len(st.session_state["favorites"]))
-    c4.metric("Диапазон цен", f"{df['Цена'].min()} - {df['Цена'].max()} грн")
-    st.markdown("---")
+st.markdown("---")
 
-    tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
-        "📋 Список товаров", 
-        f"⭐ Избранное & Топ-3 ({len(st.session_state['favorites'])})",
-        "📊 Аналитика ниши", 
-        "🔍 SEO & Ключевые слова"
-    ])
+# --- ВСЕГДА ВИДИМЫЕ ВКЛАДКИ ---
+tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
+    f"📋 Найдено товаров ({len(st.session_state['results'])})", 
+    f"⭐ Избранное & Топ-3 ({len(st.session_state['favorites'])})",
+    "📊 Аналитика ниши", 
+    "🔍 SEO & Ключевые слова"
+])
 
-    with tab_list:
+# === ВКЛАДКА 1: Поиск/Результаты ===
+with tab_list:
+    if not st.session_state["results"]:
+        st.info("💡 Нажмите **'🚀 Запустить сканирование'**, чтобы собрать товары по выбранному запросу.")
+    else:
         f_col1, f_col2 = st.columns([2, 1])
         with f_col1:
             search_filter = st.text_input("🔍 Быстрый поиск в результатах:", placeholder="Введите слово для фильтрации...")
         with f_col2:
             sort_option = st.selectbox("Сортировка:", ["По умолчанию", "Сначала дешевые", "Сначала дорогие", "По продавцу"])
 
+        df = pd.DataFrame(st.session_state["results"])
         view_df = df.copy()
+        
         if search_filter:
             view_df = view_df[view_df["Название"].str.contains(search_filter, case=False, na=False)]
         
@@ -232,7 +239,7 @@ if "results" in st.session_state and st.session_state["results"]:
                     
                 with col_main:
                     st.markdown(f"**[{item['Название']}]({item['Ссылка']})**")
-                    st.caption(f"{item['Статус']} · [Открыть карточку на Prom.ua ↗]({item['Ссылка']})")
+                    st.caption(f"{item['Статус']} · [Открыть на Prom.ua ↗]({item['Ссылка']})")
                     
                     target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
                     msg_raw = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
@@ -255,7 +262,7 @@ if "results" in st.session_state and st.session_state["results"]:
                         is_in_fav = any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"])
                         btn_label = "✅ В избранном" if is_in_fav else "⭐ В избранное"
                         
-                        if st.button(btn_label, key=f"fav_{row_idx}_{item['Ссылка'][:15]}"):
+                        if st.button(btn_label, key=f"fav_btn_{row_idx}_{item['Ссылка'][-10:]}"):
                             if is_in_fav:
                                 st.session_state["favorites"] = [f for f in st.session_state["favorites"] if f["Ссылка"] != item["Ссылка"]]
                                 st.toast("Удалено из Избранного", icon="🗑️")
@@ -278,54 +285,65 @@ if "results" in st.session_state and st.session_state["results"]:
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    with tab_fav:
-        st.subheader("⭐ Отобранные товары для детального анализа")
+# === ВКЛАДКА 2: ИЗБРАННОЕ (ВСЕГДА ДОСТУПНА) ===
+with tab_fav:
+    st.subheader("⭐ Отобранные товары для рекламы")
+    
+    if not st.session_state["favorites"]:
+        st.info("Список избранного пока пуст. Нажимайте кнопку **'⭐ В избранное'** возле интересующих товаров в списке.")
+    else:
+        fav_df = pd.DataFrame(st.session_state["favorites"])
+        st.write("Отметьте галочками **до 3-х лучших товаров** для запуска в рекламу:")
         
-        if not st.session_state["favorites"]:
-            st.info("В избранном пока ничего нет. Добавляйте товары кнопкой '⭐ В избранное'.")
-        else:
-            fav_df = pd.DataFrame(st.session_state["favorites"])
-            st.write("Отметьте **до 3-х товаров**, которые запустите в рекламу:")
+        selected_for_ads = []
+        for f_idx, f_item in fav_df.iterrows():
+            f_c1, f_c2, f_c3, f_c4 = st.columns([0.5, 1, 4, 1.5])
             
-            selected_for_ads = []
-            for f_idx, f_item in fav_df.iterrows():
-                f_c1, f_c2, f_c3, f_c4 = st.columns([0.5, 1, 4, 1.5])
-                
-                with f_c1:
-                    if st.checkbox("", key=f"chk_fav_{f_idx}"):
-                        selected_for_ads.append(f_item)
-                with f_c2:
-                    st.image(f_item["Картинка"], width=65)
-                with f_c3:
-                    st.markdown(f"**[{f_item['Название']}]({f_item['Ссылка']})**")
-                    st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
-                with f_c4:
-                    if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
-                        st.session_state["favorites"].pop(f_idx)
-                        st.rerun()
-                st.markdown("---")
+            with f_c1:
+                if st.checkbox("", key=f"chk_fav_{f_idx}"):
+                    selected_for_ads.append(f_item)
+            with f_c2:
+                st.image(f_item["Картинка"], width=65)
+            with f_c3:
+                st.markdown(f"**[{f_item['Название']}]({f_item['Ссылка']})**")
+                st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
+            with f_c4:
+                if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
+                    st.session_state["favorites"].pop(f_idx)
+                    st.rerun()
+            st.markdown("---")
 
-            if len(selected_for_ads) > 3:
-                st.warning("⚠️ Выбрано больше 3-х товаров. Рекомендуется сфокусироваться максимум на 3 офферах.")
-            
-            if selected_for_ads:
-                st.subheader("🚀 Ваша тройка для рекламного теста")
-                top_df = pd.DataFrame(selected_for_ads)
-                st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
+        if len(selected_for_ads) > 3:
+            st.warning("⚠️ Выбрано больше 3-х товаров. Лучше сфокусироваться максимум на 3 офферах для тестов!")
+        
+        if selected_for_ads:
+            st.subheader("🚀 Ваша тройка для рекламного теста")
+            top_df = pd.DataFrame(selected_for_ads)
+            st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
 
-    with tab_analytics:
+# === ВКЛАДКА 3: АНАЛИТИКА ===
+with tab_analytics:
+    if st.session_state["results"]:
+        df_an = pd.DataFrame(st.session_state["results"])
         st.subheader("📈 Распределение цен в нише")
-        fig_hist = px.histogram(df, x="Цена", nbins=20, title="Гистограмма цен",
+        fig_hist = px.histogram(df_an, x="Цена", nbins=20, title="Гистограмма цен",
                                 labels={"Цена": "Цена (грн)", "count": "Количество"},
                                 color_discrete_sequence=['#635BFF'])
         st.plotly_chart(fig_hist, use_container_width=True)
+    else:
+        st.info("Сначала запустите сканирование товаров.")
 
-    with tab_seo:
+# === ВКЛАДКА 4: SEO ===
+with tab_seo:
+    if st.session_state["results"]:
+        df_seo = pd.DataFrame(st.session_state["results"])
         st.subheader("🔑 Популярные ключевые слова")
-        raw_text = " ".join(df["Название"].tolist()).lower()
+        raw_text = " ".join(df_seo["Название"].tolist()).lower()
         words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', raw_text)
         stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'пластиковый', 'набор', 'шт', 'грн'}
         filtered_words = [w for w in words if w not in stop_words and not w.isdigit()]
         word_counts = Counter(filtered_words).most_common(15)
         seo_df = pd.DataFrame(word_counts, columns=["Слово", "Частота"])
         st.dataframe(seo_df, use_container_width=True)
+    else:
+        st.info("Сначала запустите сканирование товаров.")
