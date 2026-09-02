@@ -163,8 +163,8 @@ def get_pool_stats():
 
 # --- GEMINI AI GENERATOR ---
 def generate_ai_queries_gemini(api_key, count=30):
-    # ИСПРАВЛЕНИЕ ОШИБКИ 404: Использование актуального эндпоинта gemini-2.0-flash
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    # Обновленный эндпоинт на gemini-3.6-flash
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
