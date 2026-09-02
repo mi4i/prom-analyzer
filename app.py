@@ -11,6 +11,7 @@ import random
 from collections import Counter
 import plotly.express as px
 from urllib.parse import quote
+from datetime import date
 
 # 1. Настройка страницы
 st.set_page_config(page_title="MySales Trend - Prom Analyzer Pro", page_icon="📊", layout="wide")
@@ -18,7 +19,7 @@ st.set_page_config(page_title="MySales Trend - Prom Analyzer Pro", page_icon="�
 # --- База данных SQLite ---
 DB_NAME = "mysales_trend.db"
 
-# --- ШАБЛОНЫ СООБЩЕНИЙ ДЛЯ ПРОДАВЦОВ (10 УКРАИНСКИХ ВАРИАНТОВ) ---
+# --- ШАБЛОНЫ СООБЩЕНИЙ ДЛЯ ПРОДАВЦОВ ---
 VENDOR_MESSAGE_TEMPLATES = [
     "Добрий день! Підкажіть, будь ласка, чи співпрацюєте ви за системою дропшипінгу? Товар: {link}",
     "Вітаю! Зацікавив ваш товар. Чи є у вас можливість співпраці по дропшипінгу? Товар: {link}",
@@ -32,7 +33,6 @@ VENDOR_MESSAGE_TEMPLATES = [
     "Доброго дня! Підкажіть, які у вас є варіанти співпраці для продавців без власного складу? Посилання: {link}"
 ]
 
-# --- REGEX ДЛЯ B2B И КОНТАКТОВ ---
 REGEX_XML = r'https?://[^\s<>"]+\.(?:xml|yml)'
 REGEX_TG = r'(?:https?://)?(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+'
 REGEX_PHONE = r'(?:\+?38)?0\d{9}'
@@ -59,9 +59,86 @@ def init_db():
                     used_count INTEGER DEFAULT 0
                 )
             ''')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS vendors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    card_info TEXT,
+                    track_returns INTEGER DEFAULT 1,
+                    return_fee REAL DEFAULT 150.0
+                )
+            ''')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS shipments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vendor_id INTEGER,
+                    order_date TEXT,
+                    ttn TEXT,
+                    address TEXT,
+                    client_name TEXT,
+                    phone TEXT,
+                    item_code TEXT,
+                    cod_price REAL,
+                    qty INTEGER,
+                    drop_price REAL,
+                    status TEXT,
+                    FOREIGN KEY(vendor_id) REFERENCES vendors(id)
+                )
+            ''')
             conn.commit()
     except Exception as e:
         st.error(f"Ошибка БД при инициализации: {e}")
+
+# --- ФУНКЦИИ БД ДЛЯ ВЗАИМОРАСЧЕТОВ ---
+def get_all_vendors():
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, name, card_info, track_returns, return_fee FROM vendors ORDER BY id ASC")
+        return c.fetchall()
+
+def add_vendor(name, card_info="", track_returns=1, return_fee=150.0):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO vendors (name, card_info, track_returns, return_fee) VALUES (?, ?, ?, ?)",
+                  (name, card_info, track_returns, return_fee))
+        conn.commit()
+
+def update_vendor_settings(vendor_id, card_info, track_returns, return_fee):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("UPDATE vendors SET card_info = ?, track_returns = ?, return_fee = ? WHERE id = ?",
+                  (card_info, int(track_returns), return_fee, vendor_id))
+        conn.commit()
+
+def get_shipments_by_vendor(vendor_id):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute('''
+            SELECT id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status 
+            FROM shipments WHERE vendor_id = ? ORDER BY id DESC
+        ''', (vendor_id,))
+        return c.fetchall()
+
+def add_shipment_db(vendor_id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO shipments (vendor_id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (vendor_id, str(order_date), ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status))
+        conn.commit()
+
+def update_shipment_status_db(shipment_id, new_status):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("UPDATE shipments SET status = ? WHERE id = ?", (new_status, shipment_id))
+        conn.commit()
+
+def delete_shipment_db(shipment_id):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM shipments WHERE id = ?", (shipment_id,))
+        conn.commit()
 
 def sanitize_item(item):
     if hasattr(item, "to_dict"):
@@ -125,7 +202,6 @@ def clear_favorites_db():
     except Exception as e:
         st.error(f"Не удалось очистить БД: {e}")
 
-# --- АЛГОРИТМ ИЗВЛЕЧЕНИЯ СУТИ ТОВАРА ---
 def extract_core_product_name(title):
     eng_matches = re.findall(r'[A-Za-z0-9]{2,}(?:\s+[A-Za-z0-9]+)*', title)
     eng_words = [m.strip() for m in eng_matches if len(m.strip()) > 2]
@@ -141,7 +217,6 @@ def extract_core_product_name(title):
     
     return title[:30]
 
-# --- КОМБИНАТОРНЫЙ ГЕНЕРАТОР ---
 COMBINATOR_PROPERTIES = [
     "беспроводной", "автоматический", "сенсорный", "складной", "портативный", 
     "аккумуляторный", "магнитный", "умный", "силиконовый", "гибкий", 
@@ -166,7 +241,6 @@ def generate_combinatorial_query():
     place = random.choice(COMBINATOR_PLACES)
     return f"{prop} {prod} {place}"
 
-# --- РАБОТА С ПУЛОМ ГИПОТЕЗ ---
 def add_queries_to_pool(queries, source="AI"):
     try:
         with sqlite3.connect(DB_NAME) as conn:
@@ -204,7 +278,6 @@ def get_pool_stats():
     except Exception:
         return 0, 0
 
-# --- GEMINI AI GENERATOR ---
 def generate_ai_queries_gemini(api_key, count=30):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
@@ -265,6 +338,10 @@ def extract_graph_queries(products, top_n=5):
 # --- ИНИЦИАЛИЗАЦИЯ ---
 init_db()
 st.session_state["favorites"] = load_favorites_db()
+
+# Создание демо-поставщика, если база пустая
+if not get_all_vendors():
+    add_vendor("Миша (Drop Supply)", "4874 0700 5387 1529", 1, 150.0)
 
 if "default_query" not in st.session_state:
     st.session_state["default_query"] = generate_combinatorial_query()
@@ -461,7 +538,6 @@ if start_scan:
                         if not name:
                             continue
 
-                        # Определение B2B карточки (цена <= 5 грн или ключевые слова B2B)
                         name_lower = name.lower()
                         is_b2b = (price <= 5 and price > 0) or price == 0 or any(kw in name_lower for kw in B2B_KEYWORDS)
 
@@ -509,7 +585,6 @@ if start_scan:
 
                         sales_info = sales_el.text.strip() if sales_el else "В наличии"
 
-                        # ИЗВЛЕЧЕНИЕ B2B ИНФОРМАЦИИ И ФИДОВ
                         xml_feeds = []
                         tg_contacts = []
                         phones = []
@@ -519,7 +594,6 @@ if start_scan:
                         tg_contacts.extend(re.findall(REGEX_TG, block_html, re.IGNORECASE))
                         phones.extend(re.findall(REGEX_PHONE, block_html))
 
-                        # Глубокий поиск при заходе на страницу карточки для B2B позиций
                         if deep_b2b_scan and is_b2b and full_link:
                             try:
                                 d_res = session.get(full_link, timeout=4)
@@ -566,15 +640,16 @@ b2b_items = [p for p in all_results if p.get("is_b2b")]
 regular_items = [p for p in all_results if not p.get("is_b2b")]
 
 # --- ВКЛАДКИ ---
-tab_list, tab_b2b, tab_fav, tab_analytics, tab_seo = st.tabs([
+tab_list, tab_b2b, tab_fav, tab_shipments, tab_analytics, tab_seo = st.tabs([
     f"📋 Найдено товаров ({len(regular_items)})", 
-    f"🏢 B2B Поставщики & Фиды ({len(b2b_items)})",
+    f"🏢 B2B Поставщики ({len(b2b_items)})",
     f"⭐ Избранное в БД ({len(st.session_state['favorites'])})",
+    "📦 Отправки и Взаиморасчеты",
     "📊 Аналитика ниши", 
     "🔍 SEO & Ключевые слова"
 ])
 
-# === ВКЛАДКА 1: НАЙДЕННЫЕ ОБЫЧНЫЕ ТОВАРЫ ===
+# === ВКЛАДКА 1: НАЙДЕННЫЕ ТОВАРЫ ===
 with tab_list:
     if not regular_items:
         st.info("💡 Нажмите **'🚀 Запустить сканирование'** или используйте кнопки слева.")
@@ -682,9 +757,9 @@ with tab_list:
 # === ВКЛАДКА 2: B2B ПОСТАВЩИКИ И XML-ФИДЫ ===
 with tab_b2b:
     if not b2b_items:
-        st.info("ℹ️ B2B-объявления и поставщики не найдены. Воспользуйтесь **B2B-пресетами** в сайдбаре слева (`дропшипінг постачальник`, `xml фід` и др.).")
+        st.info("ℹ️ B2B-объявления и поставщики не найдены. Воспользуйтесь **B2B-пресетами** в сайдбаре слева.")
     else:
-        st.subheader(f"🏢 Найдено B2B-предложений и поставщиков: {len(b2b_items)}")
+        st.subheader(f"🏢 Найдено B2B-предложений: {len(b2b_items)}")
         
         for b_idx, b_item in enumerate(b2b_items):
             with st.container():
@@ -784,7 +859,207 @@ with tab_fav:
             top_df = pd.DataFrame(selected_for_ads)
             st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
 
-# === ВКЛАДКА 4: АНАЛИТИКА ===
+# === ВКЛАДКА 4: 📦 ОТПРАВКИ И ВЗАИМОРАСЧЕТЫ С ПОСТАВЩИКАМИ ===
+with tab_shipments:
+    st.subheader("📦 Модуль учета отправок и взаиморасчетов по наложенным платежам")
+    
+    vendors_list = get_all_vendors()
+    
+    col_v1, col_v2 = st.columns([3, 1])
+    with col_v1:
+        vendor_options = {f"{v[1]} (ID: {v[0]})": v for v in vendors_list}
+        selected_v_label = st.selectbox(" Выберите поставщика:", list(vendor_options.keys()))
+        selected_vendor = vendor_options[selected_v_label]
+        v_id, v_name, v_card, v_track_returns, v_return_fee = selected_vendor
+
+    with col_v2:
+        with st.popover("➕ Новый поставщик"):
+            new_v_name = st.text_input("Имя/Название поставщика:")
+            new_v_card = st.text_input("Реквизиты/Карта:")
+            new_v_returns = st.checkbox("Учитывать возвраты на себя", value=True)
+            new_v_fee = st.number_input("Логистика отказа (грн):", value=150.0, step=10.0)
+            if st.button("Сохранить поставщика", type="primary"):
+                if new_v_name:
+                    add_vendor(new_v_name, new_v_card, 1 if new_v_returns else 0, new_v_fee)
+                    st.success("Поставщик добавлен!")
+                    st.rerun()
+
+    # --- НАСТРОЙКИ УЧЕТА ПОСТАВЩИКА ---
+    with st.expander(f"⚙️ Настройки учета и реквизиты: {v_name}", expanded=False):
+        st.markdown("**Параметры списания логистики и реквизиты:**")
+        cfg_col1, cfg_col2, cfg_col3 = st.columns([2, 1.5, 2.5])
+        
+        with cfg_col1:
+            track_returns_val = st.checkbox(
+                "Вести учет возвратов/отказов", 
+                value=bool(v_track_returns),
+                help="Если включено — при отказе покупателя логистика сгорает из вашей маржи. Если отключено — поставщик берет логистику на себя."
+            )
+        with cfg_col2:
+            return_fee_val = st.number_input(
+                "Стоимость отказа (грн):", 
+                value=float(v_return_fee), 
+                step=10.0,
+                disabled=not track_returns_val
+            )
+        with cfg_col3:
+            card_info_val = st.text_input("Карта/Реквизиты поставщика:", value=v_card or "")
+
+        if st.button("💾 Сохранить настройки поставщика"):
+            update_vendor_settings(v_id, card_info_val, track_returns_val, return_fee_val)
+            st.toast("Настройки поставщика обновлены! ✅", icon="⚙️")
+            st.rerun()
+
+    st.markdown("---")
+
+    # --- ПОЛУЧЕНИЕ И РАСЧЕТ ОТПРАВОК ---
+    raw_shipments = get_shipments_by_vendor(v_id)
+    
+    total_delivered_margin = 0.0
+    total_refusal_loss = 0.0
+    count_delivered = 0
+    count_refused = 0
+    count_in_transit = 0
+
+    shipment_rows = []
+    for s in raw_shipments:
+        s_id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status = s
+        
+        total_cod = qty * cod_price
+        total_drop = qty * drop_price
+        
+        # Расчет маржи в зависимости от статуса и настроек поставщика
+        if status == "отримано":
+            margin = total_cod - total_drop
+            total_delivered_margin += margin
+            count_delivered += 1
+        elif status == "відмова":
+            margin = -v_return_fee if v_track_returns else 0.0
+            total_refusal_loss += abs(margin)
+            count_refused += 1
+        else:
+            margin = 0.0
+            count_in_transit += 1
+
+        shipment_rows.append({
+            "id": s_id,
+            "order_date": order_date,
+            "ttn": ttn,
+            "address": address,
+            "client_name": client_name,
+            "phone": phone,
+            "item_code": item_code,
+            "cod_price": cod_price,
+            "qty": qty,
+            "total_cod": total_cod,
+            "drop_price": drop_price,
+            "total_drop": total_drop,
+            "margin": margin,
+            "status": status
+        })
+
+    net_final_margin = total_delivered_margin - total_refusal_loss
+
+    # --- СВОДНЫЕ КАРТОЧКИ БАЛАНСА ---
+    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+    with m_col1:
+        st.metric("Чистая маржа к выплате", f"{net_final_margin:,.2f} грн")
+    with m_col2:
+        st.metric("Успешно забрано (Отримано)", f"{total_delivered_margin:,.2f} грн", f"{count_delivered} ТТН")
+    with m_col3:
+        st.metric("Убыток от отказов", f"-{total_refusal_loss:,.2f} грн", f"{count_refused} отказов", delta_color="inverse")
+    with m_col4:
+        st.metric("В процессе / В дороге", f"{count_in_transit} ТТН")
+
+    if v_card:
+        st.caption(f"💳 **Реквизиты для перевода / сверки с {v_name}:** `{v_card}`")
+
+    st.markdown("---")
+
+    # --- ФОРМА ДОБАВЛЕНИЯ НОВОЙ ОТПРАВКИ ---
+    with st.expander("➕ Добавить новую отправку (ТТН)", expanded=False):
+        with st.form("add_shipment_form", clear_on_submit=True):
+            f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+            with f_col1:
+                in_date = st.date_input("Дата заказа:", value=date.today())
+                in_ttn = st.text_input("№ ТТН:")
+                in_address = st.text_input("Город / Адрес:")
+            with f_col2:
+                in_client = st.text_input("ФИО Клиента:")
+                in_phone = st.text_input("№ Телефона:")
+                in_code = st.text_input("Код / Артикул товара:", value="2101")
+            with f_col3:
+                in_cod = st.number_input("Наложка за 1 шт (грн):", value=550.0, step=10.0)
+                in_qty = st.number_input("Количество (шт):", min_value=1, value=1)
+                in_drop = st.number_input("Дроп-цена за 1 шт (грн):", value=185.0, step=10.0)
+            with f_col4:
+                in_status = st.selectbox("Статус отправки:", ["в дорозі", "отримано", "відмова", "новий"])
+                st.write("")
+                st.write("")
+                btn_add_order = st.form_submit_button("Сохранить отправку", type="primary", use_container_width=True)
+
+            if btn_add_order:
+                if in_ttn:
+                    add_shipment_db(v_id, in_date, in_ttn, in_address, in_client, in_phone, in_code, in_cod, in_qty, in_drop, in_status)
+                    st.success("Отправка успешно сохранена в базу!")
+                    st.rerun()
+                else:
+                    st.warning("Укажите номер ТТН!")
+
+    # --- ТАБЛИЦА УЧЕТА И ИЗМЕНЕНИЯ СТАТУСОВ ---
+    if not shipment_rows:
+        st.info("Пока нет зафиксированных отправок для этого поставщика. Нажмите **'➕ Добавить новую отправку'** выше.")
+    else:
+        st.markdown("### 📋 Реестр отправок")
+        
+        status_options = ["в дорозі", "отримано", "відмова", "новий"]
+        
+        # Шапка таблицы
+        h_c1, h_c2, h_c3, h_c4, h_c5, h_c6, h_c7, h_c8, h_c9 = st.columns([1, 1.3, 1.8, 1.2, 1, 1, 1, 1.3, 0.5])
+        h_c1.caption("**Дата**")
+        h_c2.caption("**ТТН**")
+        h_c3.caption("**Клиент**")
+        h_c4.caption("**Код**")
+        h_c5.caption("**Наложка**")
+        h_c6.caption("**Дроп**")
+        h_c7.caption("**Маржа**")
+        h_c8.caption("**Статус**")
+        h_c9.caption("**Уд.**")
+
+        st.markdown("---")
+
+        for row in shipment_rows:
+            r_c1, r_c2, r_c3, r_c4, r_c5, r_c6, r_c7, r_c8, r_c9 = st.columns([1, 1.3, 1.8, 1.2, 1, 1, 1, 1.3, 0.5])
+            
+            r_c1.write(f"{row['order_date']}")
+            r_c2.write(f"**{row['ttn']}**")
+            r_c3.write(f"{row['client_name']}\n`{row['phone']}`")
+            r_c4.write(f"{row['item_code']} (x{row['qty']})")
+            r_c5.write(f"{row['total_cod']} грн")
+            r_c6.write(f"{row['total_drop']} грн")
+            
+            # Цветовая индикация маржи
+            if row["margin"] > 0:
+                r_c7.markdown(f"**<span style='color:green;'>+{row['margin']:,.1f} грн</span>**", unsafe_allow_html=True)
+            elif row["margin"] < 0:
+                r_c7.markdown(f"**<span style='color:red;'>{row['margin']:,.1f} грн</span>**", unsafe_allow_html=True)
+            else:
+                r_c7.write("0 грн")
+
+            # Выпадающий список прямого изменения статуса
+            cur_idx = status_options.index(row["status"]) if row["status"] in status_options else 0
+            new_st = r_c8.selectbox("", status_options, index=cur_idx, key=f"st_sel_{row['id']}", label_visibility="collapsed")
+            
+            if new_st != row["status"]:
+                update_shipment_status_db(row["id"], new_st)
+                st.toast(f"Статус ТТН {row['ttn']} изменен на '{new_st}'", icon="🔄")
+                st.rerun()
+
+            if r_c9.button("❌", key=f"del_ship_{row['id']}"):
+                delete_shipment_db(row["id"])
+                st.rerun()
+
+# === ВКЛАДКА 5: АНАЛИТИКА ===
 with tab_analytics:
     if st.session_state["results"]:
         df_an = pd.DataFrame(st.session_state["results"])
@@ -796,7 +1071,7 @@ with tab_analytics:
     else:
         st.info("Сначала запустите сканирование товаров.")
 
-# === ВКЛАДКА 5: SEO ===
+# === ВКЛАДКА 6: SEO ===
 with tab_seo:
     if st.session_state["results"]:
         df_seo = pd.DataFrame(st.session_state["results"])
