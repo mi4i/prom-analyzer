@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import requests
@@ -21,14 +22,12 @@ def init_db():
     try:
         with sqlite3.connect(DB_NAME) as conn:
             c = conn.cursor()
-            # Таблиця обраного
             c.execute('''
                 CREATE TABLE IF NOT EXISTS favorites (
                     link TEXT PRIMARY KEY,
                     data TEXT
                 )
             ''')
-            # Таблиця пулу пошукових гіпотез (Smart Query Pool)
             c.execute('''
                 CREATE TABLE IF NOT EXISTS query_pool (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +40,6 @@ def init_db():
     except Exception as e:
         st.error(f"Помилка БД при ініціалізації: {e}")
 
-# --- ФУНКЦІЇ ДЛЯ РОБОТИ З ОБРАНИМ ---
 def sanitize_item(item):
     if hasattr(item, "to_dict"):
         d = item.to_dict()
@@ -100,7 +98,7 @@ def clear_favorites_db():
     except Exception as e:
         st.error(f"Не вдалося очистити БД: {e}")
 
-# --- СЛОЙ 1: КОМБІНАТОРНИЙ ГЕНЕРАТОР (Без AI, 0 грн, мгновенно) ---
+# --- КОМБІНАТОРНИЙ ГЕНЕРАТОР ---
 COMBINATOR_PROPERTIES = [
     "безпровідний", "автоматичний", "сенсорний", "складний", "портативний", 
     "акумуляторний", "магнітний", "розумний", "силіконовий", "гнучкий", 
@@ -125,7 +123,7 @@ def generate_combinatorial_query():
     place = random.choice(COMBINATOR_PLACES)
     return f"{prop} {prod} {place}"
 
-# --- РАБОТА С ПУЛОМ ГИПОТЕЗ В SQLite ---
+# --- РОБОТА З ПУЛОМ ГІПОТЕЗ ---
 def add_queries_to_pool(queries, source="AI"):
     try:
         with sqlite3.connect(DB_NAME) as conn:
@@ -163,17 +161,17 @@ def get_pool_stats():
     except Exception:
         return 0, 0
 
-# --- СЛОЙ 2: AI-ГЕНЕРАТОР ЧЕРЕЗ GOOGLE GEMINI API (БЕСПЛАТНО) ---
+# --- GEMINI AI GENERATOR ---
 def generate_ai_queries_gemini(api_key, count=30):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
     Сгенеруй {count} пошукових запитів українською мовою для пошуку фізичних трендових товарів для дропшипінгу в Україні (для Prom.ua).
-    Орієнтовна роздрібна ціна: 300–2000 грн.
+    Орієнтовна роздрібна ціна: до 500 грн.
     
     ВИКЛЮЧИТИ: одяг, взуття, ліки, продукти харчування, складну габаритну електроніку.
-    ПЕРЕВАГА: товари з WOW-ефектом, розв'язання побутових проблем, товари для дому, авто, кухні, ванної, організації простору, догляду, компактні гаджети.
+    ПЕРЕВАГА: товари з WOW-ефектом, розв'язання побутових проблем, недорогі девайси для дому, авто, кухні, ванної, організації простору, догляду.
     
     Поверни СТРОГО JSON-масив рядків без будь-якого додаткового тексту чи размітки.
     Приклад: ["сенсорний нічник для шафи", "магнітний тримач кабелю", "міні вакууматор пакетів", "щітка для жалюзі"]
@@ -198,7 +196,6 @@ def generate_ai_queries_gemini(api_key, count=30):
         st.error(f"Не вдалося згенерувати через AI: {e}")
     return []
 
-# --- СЛОЙ 3: ГРАФ ТОВАРІВ (ВИВЛЕЧЕНИЕ КЛЮЧЕЙ ИЗ НАЙДЕННОГО) ---
 def extract_graph_queries(products, top_n=5):
     if not products:
         return []
@@ -208,7 +205,6 @@ def extract_graph_queries(products, top_n=5):
     filtered = [w for w in words if w not in stop_words and not w.isdigit()]
     most_common = [w[0] for w in Counter(filtered).most_common(top_n)]
     
-    # Скрещиваем найденные частые слова с комбинатором
     graph_queries = []
     for word in most_common:
         graph_queries.append(f"{word} {random.choice(COMBINATOR_PLACES)}")
@@ -271,11 +267,27 @@ with st.sidebar:
             st.session_state["default_query"] = generate_combinatorial_query()
             st.rerun()
 
-    with st.expander("✨ Налаштування Gemini AI (Безкоштовно)"):
-        gemini_api_key = st.text_input("Gemini API Key:", type="password", help="Отримати безкоштовно на aistudio.google.com")
+    with st.expander("✨ Налаштування Gemini AI"):
+        # Спроба отримати ключ із secrets.toml або змінних оточення
+        default_api_key = ""
+        try:
+            if "GEMINI_API_KEY" in st.secrets:
+                default_api_key = st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            pass
+        if not default_api_key:
+            default_api_key = os.getenv("GEMINI_API_KEY", "")
+
+        gemini_api_key = st.text_input(
+            "Gemini API Key:", 
+            value=default_api_key, 
+            type="password", 
+            help="Отримати безкоштовно на aistudio.google.com"
+        )
+        
         if st.button("🚀 Наповнити пул через AI (+30 фраз)"):
             if not gemini_api_key:
-                st.warning("Введіть Gemini API Key!")
+                st.warning("Введіть Gemini API Key або збережіть його в .streamlit/secrets.toml!")
             else:
                 with st.spinner("AI генерує нові пошукові фрази..."):
                     new_q = generate_ai_queries_gemini(gemini_api_key, count=30)
@@ -291,8 +303,8 @@ with st.sidebar:
     
     st.header("💰 Фільтр за ціною")
     price_filter_enabled = st.checkbox("Обмеження ціни", value=True)
-    min_price_input = st.number_input("Мін. ціна (грн):", min_value=0, value=300, step=50)
-    max_price_input = st.number_input("Макс. ціна (грн):", min_value=0, value=2000, step=50)
+    min_price_input = st.number_input("Мін. ціна (грн):", min_value=0, value=0, step=50)
+    max_price_input = st.number_input("Макс. ціна (грн):", min_value=0, value=500, step=50)
 
     st.header("🚫 Чорний список")
     exclude_keywords = st.text_input("Виключити слова (через кому):", "")
@@ -395,7 +407,6 @@ if start_scan:
                             if src:
                                 if src.startswith("//"):
                                     src = "https:" + src
-                                # Заміна параметрів для HD-картинок
                                 src = re.sub(r'_w\d+_h\d+_', '_w640_h640_', src)
                                 img_url = src
 
@@ -435,7 +446,6 @@ with tab_list:
     if not st.session_state["results"]:
         st.info("💡 Натисніть **'🚀 Запустити сканування'** або кнопку **'🎲 Згенерувати гіпотезу'** в меню ліворуч.")
     else:
-        # Автоматичне витягування нових гіпотез із знайденого (Слой 3: Граф товарів)
         graph_ideas = extract_graph_queries(st.session_state["results"])
         if graph_ideas:
             st.markdown("##### 🕸️ Скритий граф товарів (суміжні гіпотези з результатів):")
@@ -583,4 +593,4 @@ with tab_seo:
         seo_df = pd.DataFrame(word_counts, columns=["Слово", "Частота"])
         st.dataframe(seo_df, use_container_width=True)
     else:
-        st.info("Спочатку запустіть сканирование товаров.")
+        st.info("Спочатку запустіть сканування товарів.")
