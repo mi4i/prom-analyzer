@@ -12,10 +12,10 @@ from collections import Counter
 import plotly.express as px
 from urllib.parse import quote
 
-# 1. Налаштування сторінки
+# 1. Настройка страницы
 st.set_page_config(page_title="MySales Trend - Prom Analyzer Pro", page_icon="📊", layout="wide")
 
-# --- База даних SQLite ---
+# --- База данных SQLite ---
 DB_NAME = "mysales_trend.db"
 
 def init_db():
@@ -38,7 +38,7 @@ def init_db():
             ''')
             conn.commit()
     except Exception as e:
-        st.error(f"Помилка БД при ініціалізації: {e}")
+        st.error(f"Ошибка БД при инициализации: {e}")
 
 def sanitize_item(item):
     if hasattr(item, "to_dict"):
@@ -78,7 +78,7 @@ def add_favorite_db(item):
                       (clean_dict["Ссылка"], json.dumps(clean_dict, ensure_ascii=False)))
             conn.commit()
     except Exception as e:
-        st.error(f"Не вдалося зберегти в БД: {e}")
+        st.error(f"Не удалось сохранить в БД: {e}")
 
 def remove_favorite_db(link):
     try:
@@ -87,7 +87,7 @@ def remove_favorite_db(link):
             c.execute("DELETE FROM favorites WHERE link = ?", (link,))
             conn.commit()
     except Exception as e:
-        st.error(f"Не вдалося видалити з БД: {e}")
+        st.error(f"Не удалось удалить из БД: {e}")
 
 def clear_favorites_db():
     try:
@@ -96,25 +96,25 @@ def clear_favorites_db():
             c.execute("DELETE FROM favorites")
             conn.commit()
     except Exception as e:
-        st.error(f"Не вдалося очистити БД: {e}")
+        st.error(f"Не удалось очистить БД: {e}")
 
-# --- КОМБІНАТОРНИЙ ГЕНЕРАТОР ---
+# --- КОМБИНАТОРНЫЙ ГЕНЕРАТОР ---
 COMBINATOR_PROPERTIES = [
-    "безпровідний", "автоматичний", "сенсорний", "складний", "портативний", 
-    "акумуляторний", "магнітний", "розумний", "силіконовий", "гнучкий", 
-    "ультразвуковий", "компактний", "багатофункціональний", "водонепроникний"
+    "беспроводной", "автоматический", "сенсорный", "складной", "портативный", 
+    "аккумуляторный", "магнитный", "умный", "силиконовый", "гибкий", 
+    "ультразвуковой", "компактный", "многофункциональный", "водонепроницаемый"
 ]
 
 COMBINATOR_PRODUCTS = [
-    "світильник", "органайзер", "тримач", "очисник", "дозатор", "щітка", 
-    "чохол", "підставка", "диспенсер", "масажер", "ліхтарик", "аератор", 
-    "пилосос", "зволожувач", "компресор", "вакууматор", "скрабер"
+    "светильник", "органайзер", "держатель", "очиститель", "дозатор", "щетка", 
+    "чехол", "подставка", "диспенсер", "массажер", "фонарик", "аэратор", 
+    "пылесос", "увлажнитель", "компрессор", "вакууматор", "скрабер"
 ]
 
 COMBINATOR_PLACES = [
-    "для авто", "для кухні", "для ванної", "для спальні", "для шафи", 
-    "для вікон", "для взуття", "для гаджетів", "для дому", "для туалету", 
-    "для раковини", "для обличчя", "для подорожей"
+    "для авто", "для кухни", "для ванной", "для спальни", "для шкафа", 
+    "для окон", "для обуви", "для гаджетов", "для дома", "для туалета", 
+    "для раковины", "для лица", "для путешествий"
 ]
 
 def generate_combinatorial_query():
@@ -123,7 +123,7 @@ def generate_combinatorial_query():
     place = random.choice(COMBINATOR_PLACES)
     return f"{prop} {prod} {place}"
 
-# --- РОБОТА З ПУЛОМ ГІПОТЕЗ ---
+# --- РАБОТА С ПУЛОМ ГИПОТЕЗ ---
 def add_queries_to_pool(queries, source="AI"):
     try:
         with sqlite3.connect(DB_NAME) as conn:
@@ -134,7 +134,7 @@ def add_queries_to_pool(queries, source="AI"):
                     c.execute("INSERT OR IGNORE INTO query_pool (query, source) VALUES (?, ?)", (q_clean, source))
             conn.commit()
     except Exception as e:
-        st.error(f"Помилка додавання фраз до БД: {e}")
+        st.error(f"Ошибка добавления фраз в БД: {e}")
 
 def get_query_from_pool():
     try:
@@ -163,19 +163,19 @@ def get_pool_stats():
 
 # --- GEMINI AI GENERATOR ---
 def generate_ai_queries_gemini(api_key, count=30):
-    # ИСПРАВЛЕНО: заменено gemini-1.5-flash-latest -> gemini-1.5-flash
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    # ИСПРАВЛЕНИЕ ОШИБКИ 404: Использование актуального эндпоинта gemini-2.0-flash
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
-    Сгенеруй {count} пошукових запитів українською мовою для пошуку фізичних трендових товарів для дропшипінгу в Україні (для Prom.ua).
-    Орієнтовна роздрібна ціна: до 500 грн.
+    Сгенерируй {count} поисковых запросов для поиска физических трендовых товаров для дропшиппинга (для Prom.ua).
+    Ориентировочная розничная цена: до 500 грн.
     
-    ВИКЛЮЧИТИ: одяг, взуття, ліки, продукти харчування, складну габаритну електроніку.
-    ПЕРЕВАГА: товари з WOW-ефектом, розв'язання побутових проблем, недорогі девайси для дому, авто, кухні, ванної, організації простору, догляду.
+    ИСКЛЮЧИТЬ: одежду, обувь, лекарства, продукты питания, сложную габаритную электронику.
+    ПРЕДПОЧТЕНИЕ: товары с WOW-эффектом, решение бытовых проблем, недорогие девайсы для дома, авто, кухни, ванной, организации пространства, ухода.
     
-    Поверни СТРОГО JSON-масив рядків без будь-якого додаткового тексту чи размітки.
-    Приклад: ["сенсорний нічник для шафи", "магнітний тримач кабелю", "міні вакууматор пакетів", "щітка для жалюзі"]
+    Верни СТРОГО JSON-массив строк без какого-либо дополнительного текста или разметки.
+    Пример: ["сенсорный ночник для шкафа", "магнитный держатель кабеля", "мини вакууматор пакетов", "щетка для жалюзи"]
     """
     
     payload = {
@@ -192,9 +192,9 @@ def generate_ai_queries_gemini(api_key, count=30):
             if isinstance(queries, list):
                 return queries
         else:
-            st.error(f"Помилка Gemini API: {res.status_code} - {res.text}")
+            st.error(f"Ошибка Gemini API: {res.status_code} - {res.text}")
     except Exception as e:
-        st.error(f"Не вдалося згенерувати через AI: {e}")
+        st.error(f"Не удалось сгенерировать через AI: {e}")
     return []
 
 def extract_graph_queries(products, top_n=5):
@@ -211,7 +211,7 @@ def extract_graph_queries(products, top_n=5):
         graph_queries.append(f"{word} {random.choice(COMBINATOR_PLACES)}")
     return graph_queries
 
-# --- ІНІЦІАЛІЗАЦІЯ ---
+# --- ИНИЦИАЛИЗАЦИЯ ---
 init_db()
 st.session_state["favorites"] = load_favorites_db()
 
@@ -221,7 +221,7 @@ if "default_query" not in st.session_state:
 if "results" not in st.session_state:
     st.session_state["results"] = []
 
-# --- СТИЛІ CSS ---
+# --- СТИЛИ CSS ---
 st.markdown("""
 <style>
     .product-card {
@@ -255,21 +255,20 @@ with st.sidebar:
     st.header("🤖 Smart Query Engine")
     
     total_q, ai_q = get_pool_stats()
-    st.caption(f"🧠 В пулі гіпотез: **{total_q}** фраз (з них AI: {ai_q})")
+    st.caption(f"🧠 В пуле гипотез: **{total_q}** фраз (из них AI: {ai_q})")
     
     c_side1, c_side2 = st.columns(2)
     with c_side1:
-        if st.button("🎲 Згенерувати гіпотезу", use_container_width=True):
+        if st.button("🎲 Сгенерировать гипотезу", use_container_width=True):
             st.session_state["default_query"] = get_query_from_pool()
             st.rerun()
             
     with c_side2:
-        if st.button("🧩 Комбінатор", use_container_width=True):
+        if st.button("🧩 Комбинатор", use_container_width=True):
             st.session_state["default_query"] = generate_combinatorial_query()
             st.rerun()
 
-    with st.expander("✨ Налаштування Gemini AI"):
-        # Спроба отримати ключ із secrets.toml або змінних оточення
+    with st.expander("✨ Настройки Gemini AI"):
         default_api_key = ""
         try:
             if "GEMINI_API_KEY" in st.secrets:
@@ -283,45 +282,45 @@ with st.sidebar:
             "Gemini API Key:", 
             value=default_api_key, 
             type="password", 
-            help="Отримати безкоштовно на aistudio.google.com"
+            help="Получить бесплатно на aistudio.google.com"
         )
         
-        if st.button("🚀 Наповнити пул через AI (+30 фраз)"):
+        if st.button("🚀 Наполнить пул через AI (+30 фраз)"):
             if not gemini_api_key:
-                st.warning("Введіть Gemini API Key або збережіть його в .streamlit/secrets.toml!")
+                st.warning("Введите Gemini API Key или сохраните его в .streamlit/secrets.toml!")
             else:
-                with st.spinner("AI генерує нові пошукові фрази..."):
+                with st.spinner("AI генерирует новые поисковые фразы..."):
                     new_q = generate_ai_queries_gemini(gemini_api_key, count=30)
                     if new_q:
                         add_queries_to_pool(new_q, source="AI")
-                        st.success(f"Додано {len(new_q)} нових гіпотез у пул!")
+                        st.success(f"Добавлено {len(new_q)} новых гипотез в пул!")
                         st.rerun()
 
     st.markdown("---")
-    query = st.text_input("Пошуковий запит:", value=st.session_state["default_query"])
+    query = st.text_input("Поисковый запрос:", value=st.session_state["default_query"])
 
-    pages_count = st.slider("Сторінок для збору:", 1, 10, 3)
+    pages_count = st.slider("Страниц для сбора:", 1, 10, 3)
     
-    st.header("💰 Фільтр за ціною")
-    price_filter_enabled = st.checkbox("Обмеження ціни", value=True)
-    min_price_input = st.number_input("Мін. ціна (грн):", min_value=0, value=0, step=50)
-    max_price_input = st.number_input("Макс. ціна (грн):", min_value=0, value=500, step=50)
+    st.header("💰 Фильтр по цене")
+    price_filter_enabled = st.checkbox("Ограничение цены", value=True)
+    min_price_input = st.number_input("Мин. цена (грн):", min_value=0, value=0, step=50)
+    max_price_input = st.number_input("Макс. цена (грн):", min_value=0, value=500, step=50)
 
-    st.header("🚫 Чорний список")
-    exclude_keywords = st.text_input("Виключити слова (через кому):", "")
-    exclude_sellers = st.text_input("Виключити продавців:", "")
+    st.header("🚫 Черный список")
+    exclude_keywords = st.text_input("Исключить слова (через запятую):", "")
+    exclude_sellers = st.text_input("Исключить продавцов:", "")
 
-# --- ЗАПУСК СКАНИРОВАНИЯ ---
+# --- ЗАПУСК СКАНА ---
 col_btn1, col_btn2 = st.columns([1, 3])
 with col_btn1:
-    start_scan = st.button("🚀 Запустити сканування", type="primary", use_container_width=True)
+    start_scan = st.button("🚀 Запустить сканирование", type="primary", use_container_width=True)
 
 if start_scan:
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "uk-UA,uk;q=0.9,ru;q=0.8,en-US;q=0.7,en;q=0.6"
+        "Accept-Language": "ru-RU,ru;q=0.9,uk-UA,uk;q=0.8,en-US;q=0.7,en;q=0.6"
     })
     
     products = []
@@ -334,7 +333,7 @@ if start_scan:
     encoded_query = quote(query)
 
     for page in range(1, pages_count + 1):
-        status_box.info(f"⏳ Сканування сторінки {page} з {pages_count} за запитом: **{query}**...")
+        status_box.info(f"⏳ Сканирование страницы {page} из {pages_count} по запросу: **{query}**...")
         url = "https://prom.ua/ua/search"
         params = {"search_term": query, "page": page}
         
@@ -378,7 +377,7 @@ if start_scan:
                         if any(sw in name.lower() for sw in stop_words_filter):
                             continue
 
-                        supplier_name = supplier_el.text.strip() if supplier_el else "Продавець не вказаний"
+                        supplier_name = supplier_el.text.strip() if supplier_el else "Продавец не указан"
                         if any(ss in supplier_name.lower() for ss in stop_sellers_filter):
                             continue
 
@@ -411,7 +410,7 @@ if start_scan:
                                 src = re.sub(r'_w\d+_h\d+_', '_w640_h640_', src)
                                 img_url = src
 
-                        sales_info = sales_el.text.strip() if sales_el else "В наявності"
+                        sales_info = sales_el.text.strip() if sales_el else "В наличии"
 
                         products.append({
                             "Название": name,
@@ -423,7 +422,7 @@ if start_scan:
                             "Ссылка": full_link
                         })
         except Exception as e:
-            st.warning(f"Помилка завантаження сторінки {page}: {e}")
+            st.warning(f"Ошибка загрузки страницы {page}: {e}")
         
         progress_bar.progress(page / pages_count)
         time.sleep(0.8)
@@ -436,20 +435,20 @@ st.markdown("---")
 
 # --- ВКЛАДКИ ---
 tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
-    f"📋 Знайдено товарів ({len(st.session_state['results'])})", 
-    f"⭐ Обране в БД ({len(st.session_state['favorites'])})",
-    "📊 Аналітика ніші", 
-    "🔍 SEO & Ключові слова"
+    f"📋 Найдено товаров ({len(st.session_state['results'])})", 
+    f"⭐ Избранное в БД ({len(st.session_state['favorites'])})",
+    "📊 Аналитика ниши", 
+    "🔍 SEO & Ключевые слова"
 ])
 
-# === ВКЛАДКА 1: ЗНАЙДЕНІ ТОВАРИ ===
+# === ВКЛАДКА 1: НАЙДЕННЫЕ ТОВАРЫ ===
 with tab_list:
     if not st.session_state["results"]:
-        st.info("💡 Натисніть **'🚀 Запустити сканування'** або кнопку **'🎲 Згенерувати гіпотезу'** в меню ліворуч.")
+        st.info("💡 Нажмите **'🚀 Запустить сканирование'** или кнопку **'🎲 Сгенерировать гипотезу'** в меню слева.")
     else:
         graph_ideas = extract_graph_queries(st.session_state["results"])
         if graph_ideas:
-            st.markdown("##### 🕸️ Скритий граф товарів (суміжні гіпотези з результатів):")
+            st.markdown("##### 🕸️ Скрытый граф товаров (смежные гипотезы из результатов):")
             g_cols = st.columns(len(graph_ideas))
             for idx, idea in enumerate(graph_ideas):
                 with g_cols[idx]:
@@ -459,9 +458,9 @@ with tab_list:
 
         f_col1, f_col2 = st.columns([2, 1])
         with f_col1:
-            search_filter = st.text_input("🔍 Швидкий фільтр в результатах:", placeholder="Введіть слово...")
+            search_filter = st.text_input("🔍 Быстрый фильтр по результатам:", placeholder="Введите слово...")
         with f_col2:
-            sort_option = st.selectbox("Сортування:", ["За замовчуванням", "Спочатку дешевші", "Спочатку дорожчі", "За продавцем"])
+            sort_option = st.selectbox("Сортировка:", ["По умолчанию", "Сначала дешевле", "Сначала дороже", "По продавцу"])
 
         df = pd.DataFrame(st.session_state["results"])
         view_df = df.copy()
@@ -469,11 +468,11 @@ with tab_list:
         if search_filter:
             view_df = view_df[view_df["Название"].str.contains(search_filter, case=False, na=False)]
         
-        if sort_option == "Спочатку дешевші":
+        if sort_option == "Сначала дешевле":
             view_df = view_df.sort_values(by="Цена", ascending=True)
-        elif sort_option == "Спочатку дорожчі":
+        elif sort_option == "Сначала дороже":
             view_df = view_df.sort_values(by="Цена", ascending=False)
-        elif sort_option == "За продавцем":
+        elif sort_option == "По продавцу":
             view_df = view_df.sort_values(by="Поставщик")
 
         for row_idx, item in view_df.iterrows():
@@ -486,31 +485,31 @@ with tab_list:
                     
                 with col_main:
                     st.markdown(f"**[{item['Название']}]({item['Ссылка']})**")
-                    st.caption(f"{item['Статус']} · [Відкрити на Prom.ua ↗]({item['Ссылка']})")
+                    st.caption(f"{item['Статус']} · [Открыть на Prom.ua ↗]({item['Ссылка']})")
                     
                     target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
-                    msg_raw = f"Вітаю! Підкажіть, будь ласка, чи працюєте ви по дропшипінгу? Якщо так, дайте свої контакти для зв'язку (Telegram/Viber). Товар: {item['Ссылка']}"
+                    msg_raw = f"Здравствуйте! Подскажите, пожалуйста, работаете ли вы по дропшиппингу? Если да, дайте свои контакты для связи (Telegram/Viber). Товар: {item['Ссылка']}"
 
                     b_col1, b_col2 = st.columns([1, 1.2])
                     
                     with b_col1:
                         is_in_fav = any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"])
-                        btn_label = "✅ В обраному" if is_in_fav else "⭐ В обране"
+                        btn_label = "✅ В избранном" if is_in_fav else "⭐ В избранное"
                         
                         if st.button(btn_label, key=f"fav_btn_{row_idx}_{item['Ссылка'][-10:]}"):
                             if is_in_fav:
                                 remove_favorite_db(item["Ссылка"])
-                                st.toast("Видалено з БД", icon="🗑️")
+                                st.toast("Удалено из БД", icon="🗑️")
                             else:
                                 add_favorite_db(item)
-                                st.toast("Збережено в БД! ⭐", icon="✅")
+                                st.toast("Сохранено в БД! ⭐", icon="✅")
                             st.session_state["favorites"] = load_favorites_db()
                             st.rerun()
 
                     with b_col2:
-                        st.link_button("🤝 До продавця", target_url, use_container_width=True)
+                        st.link_button("🤝 К продавцу", target_url, use_container_width=True)
 
-                    st.caption("Текст для продавця:")
+                    st.caption("Текст для продавца:")
                     st.code(msg_raw, language=None)
 
                 with col_price:
@@ -518,29 +517,29 @@ with tab_list:
 
                 with col_seller:
                     if item["Ссылка_поставщика"]:
-                        st.markdown(f"**Продавець:** [{item['Поставщик']}]({item['Ссылка_поставщика']})")
+                        st.markdown(f"**Продавец:** [{item['Поставщик']}]({item['Ссылка_поставщика']})")
                     else:
-                        st.markdown(f"**Продавець:** {item['Поставщик']}")
+                        st.markdown(f"**Продавец:** {item['Поставщик']}")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# === ВКЛАДКА 2: ОБРАНЕ ===
+# === ВКЛАДКА 2: ИЗБРАННОЕ ===
 with tab_fav:
     c_fav_head, c_fav_clear = st.columns([4, 1])
     with c_fav_head:
-        st.subheader("⭐ Збережені товари в SQLite БД")
+        st.subheader("⭐ Сохраненные товары в SQLite БД")
     with c_fav_clear:
         if st.session_state["favorites"]:
-            if st.button("🧹 Очистити БД"):
+            if st.button("🧹 Очистить БД"):
                 clear_favorites_db()
                 st.session_state["favorites"] = []
                 st.rerun()
 
     if not st.session_state["favorites"]:
-        st.info("У базі даних поки немає збережених товарів. Натискайте **'⭐ В обране'** біля товарів.")
+        st.info("В базе данных пока нет сохраненных товаров. Нажимайте **'⭐ В избранное'** возле товаров.")
     else:
         fav_df = pd.DataFrame(st.session_state["favorites"])
-        st.write("Відмітьте галочками **до 3-х кращих товарів** для запуску в рекламу:")
+        st.write("Отметьте галочками **до 3-х лучших товаров** для запуска в рекламу:")
         
         selected_for_ads = []
         for f_idx, f_item in fav_df.iterrows():
@@ -553,39 +552,39 @@ with tab_fav:
                 st.image(f_item["Картинка"], width=65)
             with f_c3:
                 st.markdown(f"**[{f_item['Название']}]({f_item['Ссылка']})**")
-                st.caption(f"Продавець: {f_item['Поставщик']} | Ціна: {f_item['Цена']} грн")
+                st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
             with f_c4:
-                if st.button("🗑️ Видалити", key=f"del_fav_{f_idx}"):
+                if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
                     remove_favorite_db(f_item["Ссылка"])
                     st.session_state["favorites"] = load_favorites_db()
                     st.rerun()
             st.markdown("---")
 
         if len(selected_for_ads) > 3:
-            st.warning("⚠️ Вибрано більше 3-х товарів.")
+            st.warning("⚠️ Выбрано более 3-х товаров.")
         
         if selected_for_ads:
-            st.subheader("🚀 Ваша трійка для рекламного тесту")
+            st.subheader("🚀 Ваша тройка для рекламного теста")
             top_df = pd.DataFrame(selected_for_ads)
             st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
 
-# === ВКЛАДКА 3: АНАЛІТИКА ===
+# === ВКЛАДКА 3: АНАЛИТИКА ===
 with tab_analytics:
     if st.session_state["results"]:
         df_an = pd.DataFrame(st.session_state["results"])
-        st.subheader("📈 Розподіл цін у ніші")
-        fig_hist = px.histogram(df_an, x="Цена", nbins=20, title="Гістограма цін",
-                                labels={"Цена": "Ціна (грн)", "count": "Кількість"},
+        st.subheader("📈 Распределение цен в нише")
+        fig_hist = px.histogram(df_an, x="Цена", nbins=20, title="Гистограмма цен",
+                                labels={"Цена": "Цена (грн)", "count": "Количество"},
                                 color_discrete_sequence=['#635BFF'])
         st.plotly_chart(fig_hist, use_container_width=True)
     else:
-        st.info("Спочатку запустіть сканування товарів.")
+        st.info("Сначала запустите сканирование товаров.")
 
 # === ВКЛАДКА 4: SEO ===
 with tab_seo:
     if st.session_state["results"]:
         df_seo = pd.DataFrame(st.session_state["results"])
-        st.subheader("🔑 Популярні ключові слова")
+        st.subheader("🔑 Популярные ключевые слова")
         raw_text = " ".join(df_seo["Название"].tolist()).lower()
         words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', raw_text)
         stop_words = {'для', 'над', 'под', 'під', 'или', 'або', 'при', 'пластиковый', 'набор', 'шт', 'грн'}
@@ -594,4 +593,4 @@ with tab_seo:
         seo_df = pd.DataFrame(word_counts, columns=["Слово", "Частота"])
         st.dataframe(seo_df, use_container_width=True)
     else:
-        st.info("Спочатку запустіть сканування товарів.")
+        st.info("Сначала запустите сканирование товаров.")
