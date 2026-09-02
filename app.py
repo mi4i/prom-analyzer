@@ -32,6 +32,12 @@ VENDOR_MESSAGE_TEMPLATES = [
     "Доброго дня! Підкажіть, які у вас є варіанти співпраці для продавців без власного складу? Посилання: {link}"
 ]
 
+# --- REGEX ДЛЯ B2B И КОНТАКТОВ ---
+REGEX_XML = r'https?://[^\s<>"]+\.(?:xml|yml)'
+REGEX_TG = r'(?:https?://)?(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+'
+REGEX_PHONE = r'(?:\+?38)?0\d{9}'
+B2B_KEYWORDS = ['постачальник', 'поставщик', 'співпраця', 'сотрудничество', 'дропшипінг', 'дропшипинг', 'xml', 'yml', 'гурт', 'опт', 'фід', 'фид', 'дистриб']
+
 def get_random_vendor_message(link):
     return random.choice(VENDOR_MESSAGE_TEMPLATES).format(link=link)
 
@@ -72,7 +78,11 @@ def sanitize_item(item):
         "Ссылка_поставщика": str(d.get("Ссылка_поставщика", "")),
         "Статус": str(d.get("Статус", "")),
         "Картинка": str(d.get("Картинка", "")),
-        "Ссылка": str(d.get("Ссылка", ""))
+        "Ссылка": str(d.get("Ссылка", "")),
+        "is_b2b": bool(d.get("is_b2b", False)),
+        "xml_feeds": list(d.get("xml_feeds", [])),
+        "tg_contacts": list(d.get("tg_contacts", [])),
+        "phones": list(d.get("phones", []))
     }
 
 def load_favorites_db():
@@ -277,6 +287,14 @@ st.markdown("""
     }
     .product-card:hover { background-color: #FBFBFE; }
 
+    .b2b-card {
+        padding: 14px;
+        border: 2px solid #635BFF;
+        border-radius: 10px;
+        background-color: #F8F7FF;
+        margin-bottom: 12px;
+    }
+
     div[data-testid="stImage"] img {
         border-radius: 8px;
         transition: transform 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
@@ -296,6 +314,27 @@ st.title("📊 MySales Trend: Smart Product Research Engine")
 
 # --- САЙДБАР ---
 with st.sidebar:
+    st.header("🏢 B2B Пресеты (Поставщики)")
+    st.caption("Быстрый поиск дистрибьюторов на Prom.ua:")
+    
+    b2b_c1, b2b_c2 = st.columns(2)
+    with b2b_c1:
+        if st.button("🤝 Дропшипінг постачальник", use_container_width=True):
+            st.session_state["default_query"] = "дропшипінг постачальник"
+            st.rerun()
+        if st.button("📦 Опт та дропшипінг", use_container_width=True):
+            st.session_state["default_query"] = "опт та дропшипінг"
+            st.rerun()
+            
+    with b2b_c2:
+        if st.button("💼 Дропшипінг співпраця", use_container_width=True):
+            st.session_state["default_query"] = "дропшипінг співпраця"
+            st.rerun()
+        if st.button("📄 XML фід дропшипінг", use_container_width=True):
+            st.session_state["default_query"] = "xml фід дропшипінг"
+            st.rerun()
+
+    st.markdown("---")
     st.header("🤖 Smart Query Engine")
     
     total_q, ai_q = get_pool_stats()
@@ -345,8 +384,14 @@ with st.sidebar:
 
     pages_count = st.slider("Страниц для сбора:", 1, 10, 3)
     
+    deep_b2b_scan = st.checkbox(
+        "🔍 Глубокий поиск B2B-контактов (заходить в карточки за XML/Telegram)", 
+        value=True,
+        help="При обнаружении B2B-объявления парсер перейдет на страницу товара и извлечет XML-фиды, Telegram и телефоны."
+    )
+
     st.header("💰 Фильтр по цене")
-    price_filter_enabled = st.checkbox("Ограничение цены", value=True)
+    price_filter_enabled = st.checkbox("Ограничение цены (авто-отключается для B2B)", value=True)
     min_price_input = st.number_input("Мин. цена (грн):", min_value=0, value=0, step=50)
     max_price_input = st.number_input("Макс. цена (грн):", min_value=0, value=500, step=50)
 
@@ -413,10 +458,14 @@ if start_scan:
                         digits = "".join(c for c in raw_price if c.isdigit())
                         price = int(digits) if digits else 0
                         
-                        if price == 0 or not name:
+                        if not name:
                             continue
 
-                        if price_filter_enabled:
+                        # Определение B2B карточки (цена <= 5 грн или ключевые слова B2B)
+                        name_lower = name.lower()
+                        is_b2b = (price <= 5 and price > 0) or price == 0 or any(kw in name_lower for kw in B2B_KEYWORDS)
+
+                        if price_filter_enabled and not is_b2b:
                             if min_price_input > 0 and price < min_price_input:
                                 continue
                             if max_price_input > 0 and price > max_price_input:
@@ -460,6 +509,32 @@ if start_scan:
 
                         sales_info = sales_el.text.strip() if sales_el else "В наличии"
 
+                        # ИЗВЛЕЧЕНИЕ B2B ИНФОРМАЦИИ И ФИДОВ
+                        xml_feeds = []
+                        tg_contacts = []
+                        phones = []
+
+                        block_html = str(b)
+                        xml_feeds.extend(re.findall(REGEX_XML, block_html, re.IGNORECASE))
+                        tg_contacts.extend(re.findall(REGEX_TG, block_html, re.IGNORECASE))
+                        phones.extend(re.findall(REGEX_PHONE, block_html))
+
+                        # Глубокий поиск при заходе на страницу карточки для B2B позиций
+                        if deep_b2b_scan and is_b2b and full_link:
+                            try:
+                                d_res = session.get(full_link, timeout=4)
+                                if d_res.status_code == 200:
+                                    d_text = d_res.text
+                                    xml_feeds.extend(re.findall(REGEX_XML, d_text, re.IGNORECASE))
+                                    tg_contacts.extend(re.findall(REGEX_TG, d_text, re.IGNORECASE))
+                                    phones.extend(re.findall(REGEX_PHONE, d_text))
+                            except Exception:
+                                pass
+
+                        xml_feeds = sorted(list(set(xml_feeds)))
+                        tg_contacts = sorted(list(set(tg_contacts)))
+                        phones = sorted(list(set(phones)))
+
                         products.append({
                             "Название": name,
                             "Цена": price,
@@ -467,7 +542,11 @@ if start_scan:
                             "Ссылка_поставщика": supplier_link,
                             "Статус": sales_info,
                             "Картинка": img_url,
-                            "Ссылка": full_link
+                            "Ссылка": full_link,
+                            "is_b2b": is_b2b,
+                            "xml_feeds": xml_feeds,
+                            "tg_contacts": tg_contacts,
+                            "phones": phones
                         })
         except Exception as e:
             st.warning(f"Ошибка загрузки страницы {page}: {e}")
@@ -481,20 +560,26 @@ if start_scan:
 
 st.markdown("---")
 
+# --- РАЗДЕЛЕНИЕ ТОВАРОВ И B2B ---
+all_results = st.session_state["results"]
+b2b_items = [p for p in all_results if p.get("is_b2b")]
+regular_items = [p for p in all_results if not p.get("is_b2b")]
+
 # --- ВКЛАДКИ ---
-tab_list, tab_fav, tab_analytics, tab_seo = st.tabs([
-    f"📋 Найдено товаров ({len(st.session_state['results'])})", 
+tab_list, tab_b2b, tab_fav, tab_analytics, tab_seo = st.tabs([
+    f"📋 Найдено товаров ({len(regular_items)})", 
+    f"🏢 B2B Поставщики & Фиды ({len(b2b_items)})",
     f"⭐ Избранное в БД ({len(st.session_state['favorites'])})",
     "📊 Аналитика ниши", 
     "🔍 SEO & Ключевые слова"
 ])
 
-# === ВКЛАДКА 1: НАЙДЕННЫЕ ТОВАРЫ ===
+# === ВКЛАДКА 1: НАЙДЕННЫЕ ОБЫЧНЫЕ ТОВАРЫ ===
 with tab_list:
-    if not st.session_state["results"]:
-        st.info("💡 Нажмите **'🚀 Запустить сканирование'** или кнопку **'🎲 Сгенерировать гипотезу'** в меню слева.")
+    if not regular_items:
+        st.info("💡 Нажмите **'🚀 Запустить сканирование'** или используйте кнопки слева.")
     else:
-        graph_ideas = extract_graph_queries(st.session_state["results"])
+        graph_ideas = extract_graph_queries(regular_items)
         if graph_ideas:
             st.markdown("##### 🕸️ Скрытый граф товаров (смежные гипотезы из результатов):")
             g_cols = st.columns(len(graph_ideas))
@@ -506,11 +591,11 @@ with tab_list:
 
         f_col1, f_col2 = st.columns([2, 1])
         with f_col1:
-            search_filter = st.text_input("🔍 Быстрый фильтр по результатам:", placeholder="Введите слово...")
+            search_filter = st.text_input("🔍 Быстрый фильтр по результатам:", placeholder="Введите слово...", key="filter_reg")
         with f_col2:
-            sort_option = st.selectbox("Сортировка:", ["По умолчанию", "Сначала дешевле", "Сначала дороже", "По продавцу"])
+            sort_option = st.selectbox("Сортировка:", ["По умолчанию", "Сначала дешевле", "Сначала дороже", "По продавцу"], key="sort_reg")
 
-        df = pd.DataFrame(st.session_state["results"])
+        df = pd.DataFrame(regular_items)
         view_df = df.copy()
         
         if search_filter:
@@ -537,7 +622,6 @@ with tab_list:
                     
                     target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
                     
-                    # КЛЮЧ И СОСТОЯНИЕ ДЛЯ ТЕКСТА СООБЩЕНИЯ
                     msg_key = f"vendor_msg_{row_idx}_{hash(item['Ссылка'])}"
                     if msg_key not in st.session_state:
                         st.session_state[msg_key] = get_random_vendor_message(item['Ссылка'])
@@ -568,7 +652,6 @@ with tab_list:
                             st.session_state["trigger_auto_scan"] = True
                             st.rerun()
 
-                    # РЕДАКТИРУЕМОЕ ПОЛЕ И КНОПКА СМЕНЫ ВОПРОСА
                     st.caption("Текст сообщения (можно редактировать прям тут):")
                     txt_col, btn_col = st.columns([4, 1])
                     
@@ -596,11 +679,69 @@ with tab_list:
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# === ВКЛАДКА 2: ИЗБРАННОЕ ===
+# === ВКЛАДКА 2: B2B ПОСТАВЩИКИ И XML-ФИДЫ ===
+with tab_b2b:
+    if not b2b_items:
+        st.info("ℹ️ B2B-объявления и поставщики не найдены. Воспользуйтесь **B2B-пресетами** в сайдбаре слева (`дропшипінг постачальник`, `xml фід` и др.).")
+    else:
+        st.subheader(f"🏢 Найдено B2B-предложений и поставщиков: {len(b2b_items)}")
+        
+        for b_idx, b_item in enumerate(b2b_items):
+            with st.container():
+                st.markdown('<div class="b2b-card">', unsafe_allow_html=True)
+                bc_img, bc_info, bc_contacts = st.columns([1, 4, 3])
+                
+                with bc_img:
+                    st.image(b_item["Картинка"], use_container_width=True)
+                    
+                with bc_info:
+                    st.markdown(f"### 🤝 [{b_item['Название']}]({b_item['Ссылка']})")
+                    if b_item["Ссылка_поставщика"]:
+                        st.markdown(f"**Поставщик:** [{b_item['Поставщик']}]({b_item['Ссылка_поставщика']})")
+                    else:
+                        st.markdown(f"**Поставщик:** {b_item['Поставщик']}")
+                    
+                    price_display = f"{b_item['Цена']} грн" if b_item['Цена'] > 0 else "Уточняйте / Договорная"
+                    st.caption(f"Указанная цена/депозит: **{price_display}**")
+
+                    is_in_fav = any(f["Ссылка"] == b_item["Ссылка"] for f in st.session_state["favorites"])
+                    btn_fav_b2b = "✅ В избранном" if is_in_fav else "⭐ Сохранить поставщика"
+                    if st.button(btn_fav_b2b, key=f"fav_b2b_{b_idx}"):
+                        if is_in_fav:
+                            remove_favorite_db(b_item["Ссылка"])
+                            st.toast("Удалено из БД", icon="🗑️")
+                        else:
+                            add_favorite_db(b_item)
+                            st.toast("Поставщик сохранен в БД! ⭐", icon="✅")
+                        st.session_state["favorites"] = load_favorites_db()
+                        st.rerun()
+
+                with bc_contacts:
+                    st.markdown("#### 🔗 Фиды и контакты")
+                    
+                    if b_item["xml_feeds"]:
+                        st.markdown("**📄 XML / YML Фиды выгрузки:**")
+                        for xml_link in b_item["xml_feeds"]:
+                            st.markdown(f"- [`{xml_link[:50]}...`]({xml_link})")
+                    else:
+                        st.caption("📄 XML-фид в описании не найден")
+
+                    if b_item["tg_contacts"]:
+                        st.markdown("**💬 Telegram контакты/каналы:**")
+                        for tg in b_item["tg_contacts"]:
+                            tg_url = tg if tg.startswith("http") else f"https://{tg}"
+                            st.markdown(f"- [Telegram Manager/Channel ↗]({tg_url})")
+
+                    if b_item["phones"]:
+                        st.markdown(f"**📞 Телефоны:** {', '.join(b_item['phones'])}")
+                        
+                st.markdown('</div>', unsafe_allow_html=True)
+
+# === ВКЛАДКА 3: ИЗБРАННОЕ ===
 with tab_fav:
     c_fav_head, c_fav_clear = st.columns([4, 1])
     with c_fav_head:
-        st.subheader("⭐ Сохраненные товары в SQLite БД")
+        st.subheader("⭐ Сохраненные товары и поставщики в SQLite БД")
     with c_fav_clear:
         if st.session_state["favorites"]:
             if st.button("🧹 Очистить БД"):
@@ -626,6 +767,8 @@ with tab_fav:
             with f_c3:
                 st.markdown(f"**[{f_item['Название']}]({f_item['Ссылка']})**")
                 st.caption(f"Продавец: {f_item['Поставщик']} | Цена: {f_item['Цена']} грн")
+                if f_item.get("is_b2b"):
+                    st.markdown("`🏢 B2B Поставщик`")
             with f_c4:
                 if st.button("🗑️ Удалить", key=f"del_fav_{f_idx}"):
                     remove_favorite_db(f_item["Ссылка"])
@@ -641,7 +784,7 @@ with tab_fav:
             top_df = pd.DataFrame(selected_for_ads)
             st.dataframe(top_df[["Название", "Цена", "Поставщик", "Ссылка"]], use_container_width=True)
 
-# === ВКЛАДКА 3: АНАЛИТИКА ===
+# === ВКЛАДКА 4: АНАЛИТИКА ===
 with tab_analytics:
     if st.session_state["results"]:
         df_an = pd.DataFrame(st.session_state["results"])
@@ -653,7 +796,7 @@ with tab_analytics:
     else:
         st.info("Сначала запустите сканирование товаров.")
 
-# === ВКЛАДКА 4: SEO ===
+# === ВКЛАДКА 5: SEO ===
 with tab_seo:
     if st.session_state["results"]:
         df_seo = pd.DataFrame(st.session_state["results"])
