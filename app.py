@@ -18,6 +18,18 @@ st.set_page_config(page_title="MySales Trend - Prom Analyzer Pro", page_icon="�
 # --- База данных SQLite ---
 DB_NAME = "mysales_trend.db"
 
+# --- ШАБЛОНЫ СООБЩЕНИЙ ДЛЯ ПРОДАВЦОВ ---
+VENDOR_MESSAGE_TEMPLATES = [
+    "Здравствуйте! Подскажите, пожалуйста, работаете ли вы по дропшиппингу? Если да, дайте свои контакты для связи (Telegram/Viber). Товар: {link}",
+    "Добрый день! Интересует сотрудничество по системе дропшиппинг по этому товару: {link}. Поделитесь, пожалуйста, контактами менеджера или ссылкой на канал с выгрузкой.",
+    "Приветствую! Подскажите условия работы по дропшиппингу на данную позицию: {link}. Где можно посмотреть ваш актуальный прайс и остатки?",
+    "Здравствуйте! Хотим добавить ваш товар ({link}) в наш каталог по дропшиппингу. Напишите, пожалуйста, ваши контакты для оформления заказов (Viber/Telegram).",
+    "Добрый день! Вы отправляете заказы по дропшиппингу напрямую покупателю? Напишите контакты для связи и уточнения деталей по товару: {link}"
+]
+
+def get_random_vendor_message(link):
+    return random.choice(VENDOR_MESSAGE_TEMPLATES).format(link=link)
+
 def init_db():
     try:
         with sqlite3.connect(DB_NAME) as conn:
@@ -98,15 +110,13 @@ def clear_favorites_db():
     except Exception as e:
         st.error(f"Не удалось очистить БД: {e}")
 
-# --- АЛГОРИТМ ИЗВЛЕЧЕНИЯ СУТИ ТОВАРА (Magic Brush / Модель) ---
+# --- АЛГОРИТМ ИЗВЛЕЧЕНИЯ СУТИ ТОВАРА ---
 def extract_core_product_name(title):
-    # 1. Поиск англоязычных брендов/моделей (например: Magic Brush, HOCO GM18)
     eng_matches = re.findall(r'[A-Za-z0-9]{2,}(?:\s+[A-Za-z0-9]+)*', title)
     eng_words = [m.strip() for m in eng_matches if len(m.strip()) > 2]
     if eng_words:
         return " ".join(eng_words[:3])
     
-    # 2. Если латиницы нет — очищаем украинские/русские предлоги и вводные слова
     stop_words = {'для', 'та', 'з', 'и', 'в', 'на', 'посуду', 'прибирання', 'насадками', 'штук', 'шт', 'комплект', 'универсальный', 'універсальна'}
     words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', title.lower())
     filtered = [w for w in words if w not in stop_words]
@@ -344,7 +354,6 @@ col_btn1, col_btn2 = st.columns([1, 3])
 with col_btn1:
     start_scan = st.button("🚀 Запустить сканирование", type="primary", use_container_width=True)
 
-# Проверяем, был ли вызов автосканирования из карточки товара
 if st.session_state["trigger_auto_scan"]:
     start_scan = True
     st.session_state["trigger_auto_scan"] = False
@@ -522,9 +531,10 @@ with tab_list:
                     st.caption(f"{item['Статус']} · [Открыть на Prom.ua ↗]({item['Ссылка']})")
                     
                     target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
-                    msg_raw = f"Здравствуйте! Подскажите, пожалуйста, работаете ли вы по дропшиппингу? Если да, дайте свои контакты для связи (Telegram/Viber). Товар: {item['Ссылка']}"
+                    
+                    # ГЕНЕРАЦИЯ РАНДОМНОГО ТЕКСТА
+                    msg_raw = get_random_vendor_message(item['Ссылка'])
 
-                    # КНОПКИ ДЕЙСТВИЙ (3 колонки)
                     b_col1, b_col2, b_col3 = st.columns([1, 1, 1.3])
                     
                     with b_col1:
@@ -551,7 +561,7 @@ with tab_list:
                             st.session_state["trigger_auto_scan"] = True
                             st.rerun()
 
-                    st.caption("Текст для продавца:")
+                    st.caption("Текст для продавца (вариант подставляется случайно):")
                     st.code(msg_raw, language=None)
 
                 with col_price:
