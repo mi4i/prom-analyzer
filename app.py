@@ -130,7 +130,7 @@ DROPSHIP_CATEGORIES = {
         "пусковое устройство для авто jump starter",
         "держатель для телефона в авто с беспроводной зарядкой",
         "набор для ремонта сколов лобового стекла",
-        "водоотталкивающая пленка на зеркала авто"
+        "водооттапливающая пленка на зеркала авто"
     ],
     "🧘 Красота и Здоровье": [
         "перкуссионный массажер для тела",
@@ -182,12 +182,12 @@ with st.sidebar:
     pages_count = st.slider("Страниц для сбора:", 1, 10, 3)
     
     st.header("💰 Фильтр по цене при сборе")
-    price_filter_enabled = st.checkbox("Включить лимит цены", value=False)
+    price_filter_enabled = st.checkbox("Включить лимит цены", value=True)
     min_price_input = st.number_input("Мин. цена (грн):", min_value=0, value=0, step=50)
-    max_price_input = st.number_input("Макс. цена (грн):", min_value=0, value=5000, step=50)
+    max_price_input = st.number_input("Макс. цена (грн):", min_value=0, value=500, step=50)
 
     st.header("🚫 Черный список")
-    exclude_keywords = st.text_input("Исключить слова (через запятую):", "чехол, подставка")
+    exclude_keywords = st.text_input("Исключить слова (через запятую):", "")
     exclude_sellers = st.text_input("Исключить продавцов (через запятую):", "")
 
 # --- Запуск сканирования ---
