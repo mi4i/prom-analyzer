@@ -74,6 +74,8 @@ def init_db():
                     vendor_id INTEGER,
                     order_date TEXT,
                     ttn TEXT,
+                    city TEXT,
+                    nova_poshta_branch TEXT,
                     address TEXT,
                     client_name TEXT,
                     phone TEXT,
@@ -81,10 +83,22 @@ def init_db():
                     cod_price REAL,
                     qty INTEGER,
                     drop_price REAL,
+                    purchase_price REAL,
                     status TEXT,
                     FOREIGN KEY(vendor_id) REFERENCES vendors(id)
                 )
             ''')
+            # Миграции для уже существующей базы данных
+            c.execute("PRAGMA table_info(shipments)")
+            existing_columns = {row[1] for row in c.fetchall()}
+
+            if "city" not in existing_columns:
+                c.execute("ALTER TABLE shipments ADD COLUMN city TEXT")
+            if "nova_poshta_branch" not in existing_columns:
+                c.execute("ALTER TABLE shipments ADD COLUMN nova_poshta_branch TEXT")
+            if "purchase_price" not in existing_columns:
+                c.execute("ALTER TABLE shipments ADD COLUMN purchase_price REAL")
+
             conn.commit()
     except Exception as e:
         st.error(f"Ошибка БД при инициализации: {e}")
@@ -114,18 +128,31 @@ def get_shipments_by_vendor(vendor_id):
     with sqlite3.connect(DB_NAME) as conn:
         c = conn.cursor()
         c.execute('''
-            SELECT id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status 
+            SELECT id, order_date, ttn, city, nova_poshta_branch, address, client_name, phone,
+                   item_code, cod_price, qty, drop_price, purchase_price, status
             FROM shipments WHERE vendor_id = ? ORDER BY id DESC
         ''', (vendor_id,))
         return c.fetchall()
 
-def add_shipment_db(vendor_id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status):
+def add_shipment_db(
+    vendor_id, order_date, ttn, city, nova_poshta_branch, address,
+    client_name, phone, item_code, cod_price, qty, drop_price,
+    purchase_price, status
+):
     with sqlite3.connect(DB_NAME) as conn:
         c = conn.cursor()
         c.execute('''
-            INSERT INTO shipments (vendor_id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (vendor_id, str(order_date), ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status))
+            INSERT INTO shipments (
+                vendor_id, order_date, ttn, city, nova_poshta_branch, address,
+                client_name, phone, item_code, cod_price, qty, drop_price,
+                purchase_price, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            vendor_id, str(order_date), ttn, city, nova_poshta_branch, address,
+            client_name, phone, item_code, cod_price, qty, drop_price,
+            purchase_price, status
+        ))
         conn.commit()
 
 def update_shipment_status_db(shipment_id, new_status):
@@ -923,17 +950,23 @@ with tab_shipments:
 
     shipment_rows = []
     for s in raw_shipments:
-        s_id, order_date, ttn, address, client_name, phone, item_code, cod_price, qty, drop_price, status = s
+        (
+            s_id, order_date, ttn, city, nova_poshta_branch, address,
+            client_name, phone, item_code, cod_price, qty, drop_price,
+            purchase_price, status
+        ) = s
         
         total_cod = qty * cod_price
         total_drop = qty * drop_price
+        effective_purchase_price = purchase_price if purchase_price is not None else drop_price
+        total_purchase = qty * effective_purchase_price
         
         # Расчет маржи в зависимости от статуса и настроек поставщика
-        if status == "отримано":
-            margin = total_cod - total_drop
+        if status in ("получено", "отримано"):
+            margin = total_cod - total_purchase
             total_delivered_margin += margin
             count_delivered += 1
-        elif status == "відмова":
+        elif status in ("отказ", "відмова"):
             margin = -v_return_fee if v_track_returns else 0.0
             total_refusal_loss += abs(margin)
             count_refused += 1
@@ -945,7 +978,9 @@ with tab_shipments:
             "id": s_id,
             "order_date": order_date,
             "ttn": ttn,
-            "address": address,
+            "city": city or "",
+            "nova_poshta_branch": nova_poshta_branch or "",
+            "address": address or "",
             "client_name": client_name,
             "phone": phone,
             "item_code": item_code,
@@ -954,6 +989,8 @@ with tab_shipments:
             "total_cod": total_cod,
             "drop_price": drop_price,
             "total_drop": total_drop,
+            "purchase_price": effective_purchase_price,
+            "total_purchase": total_purchase,
             "margin": margin,
             "status": status
         })
@@ -965,7 +1002,7 @@ with tab_shipments:
     with m_col1:
         st.metric("Чистая маржа к выплате", f"{net_final_margin:,.2f} грн")
     with m_col2:
-        st.metric("Успешно забрано (Отримано)", f"{total_delivered_margin:,.2f} грн", f"{count_delivered} ТТН")
+        st.metric("Успешно получено", f"{total_delivered_margin:,.2f} грн", f"{count_delivered} ТТН")
     with m_col3:
         st.metric("Убыток от отказов", f"-{total_refusal_loss:,.2f} грн", f"{count_refused} отказов", delta_color="inverse")
     with m_col4:
@@ -983,24 +1020,57 @@ with tab_shipments:
             with f_col1:
                 in_date = st.date_input("Дата заказа:", value=date.today())
                 in_ttn = st.text_input("№ ТТН:")
-                in_address = st.text_input("Город / Адрес:")
+                in_city = st.text_input("Город:")
+                in_np_branch = st.text_input("Отделение Новой почты №:")
+
             with f_col2:
-                in_client = st.text_input("ФИО Клиента:")
-                in_phone = st.text_input("№ Телефона:")
+                in_address = st.text_input("Адрес / примечание:")
+                in_client = st.text_input("ФИО клиента:")
+                in_phone = st.text_input("№ телефона:")
                 in_code = st.text_input("Код / Артикул товара:", value="2101")
+
             with f_col3:
                 in_cod = st.number_input("Наложка за 1 шт (грн):", value=550.0, step=10.0)
                 in_qty = st.number_input("Количество (шт):", min_value=1, value=1)
-                in_drop = st.number_input("Дроп-цена за 1 шт (грн):", value=185.0, step=10.0)
+                in_purchase = st.number_input("Закупочная цена за 1 шт (грн):", min_value=0.0, value=185.0, step=10.0)
+
             with f_col4:
-                in_status = st.selectbox("Статус отправки:", ["в дорозі", "отримано", "відмова", "новий"])
+                in_drop = st.number_input(
+                    "Дроп-цена за 1 шт (грн):",
+                    min_value=0.0,
+                    value=185.0,
+                    step=10.0,
+                    help="Оставлено для совместимости со старым учетом поставщиков."
+                )
+                in_status = st.selectbox(
+                    "Статус отправки:",
+                    ["в дороге", "получено", "отказ", "новый"]
+                )
                 st.write("")
-                st.write("")
-                btn_add_order = st.form_submit_button("Сохранить отправку", type="primary", use_container_width=True)
+                btn_add_order = st.form_submit_button(
+                    "Сохранить отправку",
+                    type="primary",
+                    use_container_width=True
+                )
 
             if btn_add_order:
                 if in_ttn:
-                    add_shipment_db(v_id, in_date, in_ttn, in_address, in_client, in_phone, in_code, in_cod, in_qty, in_drop, in_status)
+                    add_shipment_db(
+                        v_id,
+                        in_date,
+                        in_ttn,
+                        in_city,
+                        in_np_branch,
+                        in_address,
+                        in_client,
+                        in_phone,
+                        in_code,
+                        in_cod,
+                        in_qty,
+                        in_drop,
+                        in_purchase,
+                        in_status
+                    )
                     st.success("Отправка успешно сохранена в базу!")
                     st.rerun()
                 else:
@@ -1012,19 +1082,23 @@ with tab_shipments:
     else:
         st.markdown("### 📋 Реестр отправок")
         
-        status_options = ["в дорозі", "отримано", "відмова", "новий"]
+        status_options = ["в дороге", "получено", "отказ", "новый"]
         
         # Шапка таблицы
-        h_c1, h_c2, h_c3, h_c4, h_c5, h_c6, h_c7, h_c8, h_c9 = st.columns([1, 1.3, 1.8, 1.2, 1, 1, 1, 1.3, 0.5])
+        h_c1, h_c2, h_c3, h_c4, h_c5, h_c6, h_c7, h_c8, h_c9, h_c10, h_c11 = st.columns(
+            [0.9, 1.2, 1.1, 0.9, 1.7, 1, 1, 1, 1, 1.2, 0.45]
+        )
         h_c1.caption("**Дата**")
         h_c2.caption("**ТТН**")
-        h_c3.caption("**Клиент**")
-        h_c4.caption("**Код**")
-        h_c5.caption("**Наложка**")
-        h_c6.caption("**Дроп**")
-        h_c7.caption("**Маржа**")
-        h_c8.caption("**Статус**")
-        h_c9.caption("**Уд.**")
+        h_c3.caption("**Город**")
+        h_c4.caption("**НП №**")
+        h_c5.caption("**Клиент**")
+        h_c6.caption("**Код**")
+        h_c7.caption("**Наложка**")
+        h_c8.caption("**Закупка**")
+        h_c9.caption("**Маржа**")
+        h_c10.caption("**Статус**")
+        h_c11.caption("**Уд.**")
 
         st.markdown("---")
 
