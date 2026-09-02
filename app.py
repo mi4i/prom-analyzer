@@ -83,7 +83,6 @@ def init_db():
                     cod_price REAL,
                     qty INTEGER,
                     drop_price REAL,
-                    purchase_price REAL,
                     status TEXT,
                     FOREIGN KEY(vendor_id) REFERENCES vendors(id)
                 )
@@ -96,9 +95,6 @@ def init_db():
                 c.execute("ALTER TABLE shipments ADD COLUMN city TEXT")
             if "nova_poshta_branch" not in existing_columns:
                 c.execute("ALTER TABLE shipments ADD COLUMN nova_poshta_branch TEXT")
-            if "purchase_price" not in existing_columns:
-                c.execute("ALTER TABLE shipments ADD COLUMN purchase_price REAL")
-
             conn.commit()
     except Exception as e:
         st.error(f"Ошибка БД при инициализации: {e}")
@@ -129,29 +125,26 @@ def get_shipments_by_vendor(vendor_id):
         c = conn.cursor()
         c.execute('''
             SELECT id, order_date, ttn, city, nova_poshta_branch, address, client_name, phone,
-                   item_code, cod_price, qty, drop_price, purchase_price, status
+                   item_code, cod_price, qty, drop_price, status
             FROM shipments WHERE vendor_id = ? ORDER BY id DESC
         ''', (vendor_id,))
         return c.fetchall()
 
 def add_shipment_db(
     vendor_id, order_date, ttn, city, nova_poshta_branch, address,
-    client_name, phone, item_code, cod_price, qty, drop_price,
-    purchase_price, status
+    client_name, phone, item_code, cod_price, qty, drop_price, status
 ):
     with sqlite3.connect(DB_NAME) as conn:
         c = conn.cursor()
         c.execute('''
             INSERT INTO shipments (
                 vendor_id, order_date, ttn, city, nova_poshta_branch, address,
-                client_name, phone, item_code, cod_price, qty, drop_price,
-                purchase_price, status
+                client_name, phone, item_code, cod_price, qty, drop_price, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             vendor_id, str(order_date), ttn, city, nova_poshta_branch, address,
-            client_name, phone, item_code, cod_price, qty, drop_price,
-            purchase_price, status
+            client_name, phone, item_code, cod_price, qty, drop_price, status
         ))
         conn.commit()
 
@@ -423,7 +416,7 @@ with st.sidebar:
     
     b2b_c1, b2b_c2 = st.columns(2)
     with b2b_c1:
-        if st.button("🤝 Дропшипінг постачальник", use_container_width=True):
+        if st.button("🤝 Закупкашипінг постачальник", use_container_width=True):
             st.session_state["default_query"] = "дропшипінг постачальник"
             st.rerun()
         if st.button("📦 Опт та дропшипінг", use_container_width=True):
@@ -431,7 +424,7 @@ with st.sidebar:
             st.rerun()
             
     with b2b_c2:
-        if st.button("💼 Дропшипінг співпраця", use_container_width=True):
+        if st.button("💼 Закупкашипінг співпраця", use_container_width=True):
             st.session_state["default_query"] = "дропшипінг співпраця"
             st.rerun()
         if st.button("📄 XML фід дропшипінг", use_container_width=True):
@@ -952,18 +945,15 @@ with tab_shipments:
     for s in raw_shipments:
         (
             s_id, order_date, ttn, city, nova_poshta_branch, address,
-            client_name, phone, item_code, cod_price, qty, drop_price,
-            purchase_price, status
+            client_name, phone, item_code, cod_price, qty, drop_price, status
         ) = s
         
         total_cod = qty * cod_price
         total_drop = qty * drop_price
-        effective_purchase_price = purchase_price if purchase_price is not None else drop_price
-        total_purchase = qty * effective_purchase_price
         
         # Расчет маржи в зависимости от статуса и настроек поставщика
         if status in ("получено", "отримано"):
-            margin = total_cod - total_purchase
+            margin = total_cod - total_drop
             total_delivered_margin += margin
             count_delivered += 1
         elif status in ("отказ", "відмова"):
@@ -989,8 +979,6 @@ with tab_shipments:
             "total_cod": total_cod,
             "drop_price": drop_price,
             "total_drop": total_drop,
-            "purchase_price": effective_purchase_price,
-            "total_purchase": total_purchase,
             "margin": margin,
             "status": status
         })
@@ -1032,20 +1020,19 @@ with tab_shipments:
             with f_col3:
                 in_cod = st.number_input("Наложка за 1 шт (грн):", value=550.0, step=10.0)
                 in_qty = st.number_input("Количество (шт):", min_value=1, value=1)
-                in_purchase = st.number_input("Закупочная цена за 1 шт (грн):", min_value=0.0, value=185.0, step=10.0)
-
-            with f_col4:
                 in_drop = st.number_input(
-                    "Дроп-цена за 1 шт (грн):",
+                    "Закупочная цена за 1 шт (грн):",
                     min_value=0.0,
                     value=185.0,
-                    step=10.0,
-                    help="Оставлено для совместимости со старым учетом поставщиков."
+                    step=10.0
                 )
+
+            with f_col4:
                 in_status = st.selectbox(
                     "Статус отправки:",
                     ["в дороге", "получено", "отказ", "новый"]
                 )
+                st.write("")
                 st.write("")
                 btn_add_order = st.form_submit_button(
                     "Сохранить отправку",
@@ -1068,7 +1055,6 @@ with tab_shipments:
                         in_cod,
                         in_qty,
                         in_drop,
-                        in_purchase,
                         in_status
                     )
                     st.success("Отправка успешно сохранена в базу!")
