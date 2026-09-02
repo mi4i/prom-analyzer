@@ -98,6 +98,24 @@ def clear_favorites_db():
     except Exception as e:
         st.error(f"Не удалось очистить БД: {e}")
 
+# --- АЛГОРИТМ ИЗВЛЕЧЕНИЯ СУТИ ТОВАРА (Magic Brush / Модель) ---
+def extract_core_product_name(title):
+    # 1. Поиск англоязычных брендов/моделей (например: Magic Brush, HOCO GM18)
+    eng_matches = re.findall(r'[A-Za-z0-9]{2,}(?:\s+[A-Za-z0-9]+)*', title)
+    eng_words = [m.strip() for m in eng_matches if len(m.strip()) > 2]
+    if eng_words:
+        return " ".join(eng_words[:3])
+    
+    # 2. Если латиницы нет — очищаем украинские/русские предлоги и вводные слова
+    stop_words = {'для', 'та', 'з', 'и', 'в', 'на', 'посуду', 'прибирання', 'насадками', 'штук', 'шт', 'комплект', 'универсальный', 'універсальна'}
+    words = re.findall(r'\b[a-ua-яєії0-9]{3,}\b', title.lower())
+    filtered = [w for w in words if w not in stop_words]
+    
+    if filtered:
+        return " ".join(filtered[:3])
+    
+    return title[:30]
+
 # --- КОМБИНАТОРНЫЙ ГЕНЕРАТОР ---
 COMBINATOR_PROPERTIES = [
     "беспроводной", "автоматический", "сенсорный", "складной", "портативный", 
@@ -182,7 +200,6 @@ def generate_ai_queries_gemini(api_key, count=30):
         "generationConfig": {"response_mime_type": "application/json"}
     }
     
-    # 2 попытки с увеличенным таймаутом (10 сек сопряжение, 60 сек чтение)
     for attempt in range(2):
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=(10, 60))
@@ -229,6 +246,9 @@ if "default_query" not in st.session_state:
 
 if "results" not in st.session_state:
     st.session_state["results"] = []
+
+if "trigger_auto_scan" not in st.session_state:
+    st.session_state["trigger_auto_scan"] = False
 
 # --- СТИЛИ CSS ---
 st.markdown("""
@@ -323,6 +343,11 @@ with st.sidebar:
 col_btn1, col_btn2 = st.columns([1, 3])
 with col_btn1:
     start_scan = st.button("🚀 Запустить сканирование", type="primary", use_container_width=True)
+
+# Проверяем, был ли вызов автосканирования из карточки товара
+if st.session_state["trigger_auto_scan"]:
+    start_scan = True
+    st.session_state["trigger_auto_scan"] = False
 
 if start_scan:
     session = requests.Session()
@@ -499,7 +524,8 @@ with tab_list:
                     target_url = item["Ссылка_поставщика"] if item["Ссылка_поставщика"] else item["Ссылка"]
                     msg_raw = f"Здравствуйте! Подскажите, пожалуйста, работаете ли вы по дропшиппингу? Если да, дайте свои контакты для связи (Telegram/Viber). Товар: {item['Ссылка']}"
 
-                    b_col1, b_col2 = st.columns([1, 1.2])
+                    # КНОПКИ ДЕЙСТВИЙ (3 колонки)
+                    b_col1, b_col2, b_col3 = st.columns([1, 1, 1.3])
                     
                     with b_col1:
                         is_in_fav = any(f["Ссылка"] == item["Ссылка"] for f in st.session_state["favorites"])
@@ -517,6 +543,13 @@ with tab_list:
 
                     with b_col2:
                         st.link_button("🤝 К продавцу", target_url, use_container_width=True)
+
+                    with b_col3:
+                        core_name = extract_core_product_name(item["Название"])
+                        if st.button(f"🔎 Все продавцы ({core_name})", key=f"find_all_{row_idx}_{item['Ссылка'][-10:]}", use_container_width=True):
+                            st.session_state["default_query"] = core_name
+                            st.session_state["trigger_auto_scan"] = True
+                            st.rerun()
 
                     st.caption("Текст для продавца:")
                     st.code(msg_raw, language=None)
