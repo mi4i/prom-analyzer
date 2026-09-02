@@ -11,7 +11,7 @@ from collections import Counter
 import plotly.express as px
 from urllib.parse import quote
 
-# 1. Сеттинг страницы ОБЯЗАТЕЛЬНО идет первой командой Streamlit
+# 1. Налаштування сторінки
 st.set_page_config(page_title="Prom Analyzer Pro", page_icon="📊", layout="wide")
 
 # --- Безопасная работа с SQLite на сервере ---
@@ -151,6 +151,7 @@ st.session_state["favorites"] = load_favorites_db()
 if "results" not in st.session_state:
     st.session_state["results"] = []
 
+# --- Стили CSS с поддержкой увеличения картинок ---
 st.markdown("""
 <style>
     .product-card {
@@ -161,6 +162,20 @@ st.markdown("""
         margin-bottom: 12px;
     }
     .product-card:hover { background-color: #FBFBFE; }
+
+    /* Эффект плавного увеличения картинок при наведении */
+    div[data-testid="stImage"] img {
+        border-radius: 8px;
+        transition: transform 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
+        cursor: zoom-in;
+        object-fit: contain;
+    }
+    div[data-testid="stImage"] img:hover {
+        transform: scale(2.2);
+        position: relative;
+        z-index: 9999;
+        box-shadow: 0px 10px 25px rgba(0, 0, 0, 0.35);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -274,9 +289,23 @@ if start_scan:
 
                         img_url = "https://via.placeholder.com/85?text=No+Photo"
                         if img_el:
-                            src = img_el.get("src") or img_el.get("data-src") or img_el.get("srcset", "").split(" ")[0]
+                            src = ""
+                            srcset = img_el.get("srcset", "")
+                            if srcset:
+                                # Отримуємо найвищу роздільну здатність із srcset
+                                candidates = [item.strip().split(" ")[0] for item in srcset.split(",") if item.strip()]
+                                if candidates:
+                                    src = candidates[-1]
+                            
+                            if not src:
+                                src = img_el.get("data-src") or img_el.get("src") or img_el.get("data-lazy-src") or ""
+
                             if src:
-                                img_url = "https:" + src if src.startswith("//") else src
+                                if src.startswith("//"):
+                                    src = "https:" + src
+                                # Автоматично змінюємо мініатюру Prom (_w100_h100_, _w200_h200_) на високу якість (_w640_h640_)
+                                src = re.sub(r'_w\d+_h\d+_', '_w640_h640_', src)
+                                img_url = src
 
                         sales_info = sales_el.text.strip() if sales_el else "В наличии"
 
